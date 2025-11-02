@@ -53,22 +53,13 @@ img{ display:block; max-width:100%; }
 .crash-chip.good{ background:#133a2a; color:#6cffb0; }
 .crash-chip.bad{ background:#3a1a1a; color:#ff9d9d; }
 
-/* stage layout */
+/* stage */
 .stage{ position:relative; padding:8px 0 4px; }
 .centerHUD{ text-align:center; margin:6px 0 4px; }
-.mult{ font-size:32px; font-weight:800; }
-.status{ color:var(--muted); margin-top:2px; font-size:14px; }
-
-/* коэффициент + подсказка профита */
 .mult-wrap{ display:flex; align-items:baseline; gap:.5rem; justify-content:center; }
-.profit{ font-size:16px; font-weight:600; color:var(--ok); }
-
-/* gift near multiplier */
-.gift-now{
-  display:flex; align-items:center; justify-content:center;
-  gap:8px; margin-top:6px; color:var(--muted); font-size:14px;
-}
-.gift-now img{ width:24px; height:24px; border-radius:6px; object-fit:cover; }
+.mult{ font-size:32px; font-weight:800; }
+.payout-top{ font-size:16px; font-weight:600; color:var(--ok); }
+.status{ color:var(--muted); margin-top:2px; font-size:14px; }
 
 /* chart */
 .chart-wrap{
@@ -95,9 +86,7 @@ img{ display:block; max-width:100%; }
   0%,100%{ box-shadow:0 0 0 0 rgba(34,229,138,.0); }
   50%{ box-shadow:0 0 18px 2px rgba(34,229,138,.25); }
 }
-
-/* зелёный «Забрать», когда есть активная ставка */
-#cashoutBtn.armed{ background:var(--ok); color:#0b1a12; border-color:transparent; }
+#cashoutBtn.armed{ background:var(--ok); color:#0b1a12; }
 
 /* players list */
 .players{
@@ -106,6 +95,7 @@ img{ display:block; max-width:100%; }
 }
 .players-head{ display:flex; justify-content:space-between; color:var(--muted); margin-bottom:6px; }
 .players-list{ display:flex; flex-direction:column; gap:6px; max-height:200px; overflow:auto; }
+
 .player{
   display:flex; justify-content:space-between; align-items:center;
   padding:8px 10px; background:#0f1520; border-radius:10px;
@@ -114,10 +104,9 @@ img{ display:block; max-width:100%; }
 .pava{ width:28px; height:28px; border-radius:50%; object-fit:cover; background:#222; flex-shrink:0; }
 .pava--ph{ background:#2a3344; }
 .pname{ font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px; }
+
 .pval{ display:flex; flex-direction:column; align-items:flex-end; }
 .pval.good{ color:var(--ok); }
-
-/* gifts in players */
 .pgift{ display:flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; margin-top:4px; }
 .pgift img{ width:20px; height:20px; border-radius:4px; object-fit:cover; }
 
@@ -157,7 +146,7 @@ img{ display:block; max-width:100%; }
   .players{ grid-column:2; margin-top:0; }
 }
 
-/* скрыть стрелки у number-инпутов (на всякий случай) */
+/* прячем спиннеры у number на всякий случай */
 input[type=number]::-webkit-inner-spin-button,
 input[type=number]::-webkit-outer-spin-button{ -webkit-appearance:none; margin:0; }
 input[type=number]{ -moz-appearance:textfield; }
