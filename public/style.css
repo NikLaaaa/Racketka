@@ -95,3 +95,6 @@ img{display:block}
 /* ===== анти-фриз/клики ===== */
 .wrap, .stage, .stage *{pointer-events:auto !important}
 .modal:not(.open){display:none !important;visibility:hidden !important;pointer-events:none !important}
+.hidden{ display:none !important; }
+
+
