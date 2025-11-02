@@ -10,13 +10,22 @@
   --shadow: 0 6px 24px rgba(0,0,0,.35);
 }
 
-*{ box-sizing:border-box; }
-html,body{
+/* safe-area и корректная высота на iOS */
+:root { --safe-bottom: env(safe-area-inset-bottom, 0px); }
+@supports (padding-bottom: constant(safe-area-inset-bottom)) {
+  :root { --safe-bottom: constant(safe-area-inset-bottom); }
+}
+html,body{ height:100%; }
+body{
   margin:0; padding:0;
   background:var(--bg);
   color:var(--text);
   font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  min-height:100dvh;
+  padding-bottom:max(8px, var(--safe-bottom));
 }
+
+*{ box-sizing:border-box; }
 img{ display:block; }
 
 .wrap{ max-width:900px; margin:0 auto; padding:12px; }
@@ -63,15 +72,12 @@ img{ display:block; }
 /* stage layout */
 .stage{ position:relative; padding:8px 0 4px; }
 .centerHUD{ text-align:center; margin:6px 0 4px; }
-.mult{
-  font-size:32px;
-  font-weight:800;
-}
-.status{
-  color:var(--muted);
-  margin-top:2px;
-  font-size:14px;
-}
+.mult{ font-size:32px; font-weight:800; }
+.status{ color:var(--muted); margin-top:2px; font-size:14px; }
+
+/* коэффициент + подсказка профита */
+.mult-wrap{ display:flex; align-items:baseline; gap:.5rem; justify-content:center; }
+.profit{ font-size:16px; font-weight:600; color:var(--ok); }
 
 /* chart */
 .chart-wrap{
@@ -84,10 +90,7 @@ img{ display:block; }
   overflow:hidden;
   box-shadow:var(--shadow);
 }
-#chartCanvas{
-  width:100%; height:100%;
-  display:block;
-}
+#chartCanvas{ width:100%; height:100%; display:block; }
 
 /* buttons */
 .cta{ margin:12px 0; }
@@ -103,6 +106,13 @@ img{ display:block; }
 .btn.primary{ background:var(--primary); }
 .btn.cash{ background:#233047; }
 .btn.ghost{ background:#1a2333; }
+
+/* зелёный «Забрать», когда есть активная ставка */
+#cashoutBtn.armed{
+  background: var(--ok);
+  color:#0b1a12;
+  border-color: transparent;
+}
 
 /* players list */
 .players{
@@ -128,6 +138,9 @@ img{ display:block; }
   background:#0f1520;
   border-radius:10px;
 }
+.pinfo{ display:flex; align-items:center; gap:10px; }
+.pava{ width:28px; height:28px; border-radius:50%; object-fit:cover; background:#222; }
+.pava--ph{ background:#2a3344; }
 .pname{ font-weight:600; }
 .pval.good{ color:var(--ok); }
 
@@ -142,8 +155,6 @@ img{ display:block; }
   border-radius:14px;
   margin-bottom:12px;
 }
-
-/* ✅ фикс огромной TON картинки */
 .profile-ava{
   width:64px;
   height:64px;
@@ -152,7 +163,6 @@ img{ display:block; }
   background:#233047;
   flex-shrink:0;
 }
-
 .profile-name{ font-weight:700; }
 .profile-balance{
   margin-left:auto;
@@ -160,28 +170,17 @@ img{ display:block; }
   align-items:center;
   gap:6px;
 }
-.profile-balance img{
-  width:18px; height:18px;
-  flex-shrink:0;
-}
+.profile-balance img{ width:18px; height:18px; flex-shrink:0; }
 
-.profile-actions{
-  display:flex; flex-direction:column;
-  gap:8px;
-  margin-top:12px;
-}
-
-.wallet-info{
-  margin-top:8px;
-  color:var(--muted);
-  word-break:break-all;
-}
+.profile-actions{ display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+.wallet-info{ margin-top:8px; color:var(--muted); word-break:break-all; }
 
 /* footer */
 .footer{
   position:sticky; bottom:0;
   background:linear-gradient(180deg,transparent, rgba(0,0,0,.45));
   padding-top:8px;
+  padding-bottom: max(8px, var(--safe-bottom));
 }
 .tabbar{
   display:flex;
