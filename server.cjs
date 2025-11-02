@@ -8,12 +8,12 @@ const fs = require('fs').promises;
 const https = require('https');
 const fetch = global.fetch || require('node-fetch');
 
-const PORT = Number(process.env.PORT || 3000);
-const SECRET_KEY = process.env.SECRET_KEY || 'supersecret';
-const DEPOSIT_WALLET = process.env.DEPOSIT_WALLET || '';
-const TONAPI_KEY = process.env.TONAPI_KEY || '';
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''; // нужен для Stars
-const TG = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : null;
+const PORT          = Number(process.env.PORT || 3000);
+const SECRET_KEY    = process.env.SECRET_KEY || 'supersecret';
+const DEPOSIT_WALLET= process.env.DEPOSIT_WALLET || '';
+const TONAPI_KEY    = process.env.TONAPI_KEY || '';
+const BOT_TOKEN     = process.env.TELEGRAM_BOT_TOKEN || ''; // нужен для Stars
+const TG            = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : null;
 
 if (!DEPOSIT_WALLET) console.warn('⚠️ .env: DEPOSIT_WАЛLET не задан — автозачисления TON не будут работать');
 
@@ -107,7 +107,7 @@ const FALLBACK_COLLECTIONS = (process.env.GIFT_COLLECTIONS
     "EQC6zR5J16bPk2WMm45u5hNRqY3uG0KfkVGZei2nk3p8yF8B",
     "EQDY0ChXQmrChSCRQG_iqU4bJSgvnnNGgEe9Jv6WXr2Kt7F1",
     "EQB0F2XJMJW9nmLqQ7SATeNTvEhLO07NGuOsUDgl3fD0PGV8",
-    "EQCuqE4UeWvfpAaPOX1GHTz6Aw7v822lI55kBo4BIpi7Um6I",
+    "EQCuqE4UeWvfpAaPOX1GHTз6Aw7v822lI55kBo4BIpi7Um6I",
     "EQAE9o6ZHkzX2uE1lGwSr5i_NjS6ChRik0_jxs6NKwLGQuUk",
     "EQDLBDXh7hIXR3k9w9CUgTCe56OA6NLrN_hhWxhXNupP6v0s",
     "EQBTJ5RnZvG_yiCowsfeHS_TukDn687801Dv0H6BxccVF6yq"
@@ -325,7 +325,6 @@ async function pollTonCenter(){
   server.listen(PORT, ()=>{ console.log(`🚀 http://localhost:${PORT}`); startRound(); });
 })();
 
-// Запускаем polling-бота только если явно включён флагом (чтобы не ловить 409)
+// НЕ включаем polling-бота автоматически (чтобы не ловить 409 на Render)
 const ENABLE_BOT_POLLING = String(process.env.ENABLE_BOT_POLLING || '').toLowerCase() === 'true';
 if (ENABLE_BOT_POLLING) { try { require('./bot.cjs'); } catch(e){ console.error('bot.cjs load error', e); } }
-
