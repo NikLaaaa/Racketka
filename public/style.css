@@ -112,3 +112,17 @@ input, button { pointer-events:auto !important; }
 
 /* ====== iOS безопасные отступы (если делал full-screen) ====== */
 body{ padding-bottom: env(safe-area-inset-bottom); }
+/* --- anti-freeze / unblock clicks --- */
+.wrap, .stage, .stage * { pointer-events: auto !important; }
+
+/* модалка точно не ловит клики, если не открыта */
+.modal:not(.open){
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* на всякий случай: канвас не перехватывает тапы, если всплыл над кнопкой */
+#chartCanvas { pointer-events: none; }
+
+
