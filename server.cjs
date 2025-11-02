@@ -327,4 +327,5 @@ async function pollTonCenter(){
 
 // Запускаем polling-бота только если явно включён флагом (чтобы не ловить 409)
 const ENABLE_BOT_POLLING = String(process.env.ENABLE_BOT_POLLING || '').toLowerCase() === 'true';
-if (ENABLE_BOT_POLLING) { try { require('./bot.js'); } catch(e){ console.error('bot.js load error', e); } }
+if (ENABLE_BOT_POLLING) { try { require('./bot.cjs'); } catch(e){ console.error('bot.cjs load error', e); } }
+
