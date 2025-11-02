@@ -464,37 +464,50 @@
     if (fill) wctx.fill(); if (stroke) wctx.stroke();
   }
 
-  async function buyStarsAndSpin(){
-    const tg = window.Telegram?.WebApp;
-    if (!tg){ alert('Откройте мини-приложение в Telegram'); return; }
-    try{
-      const r = await fetch('/stars/create', {
-        method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({ userId: state.userId, amount: WSTATE.price })
-      }).then(r=>r.json());
-      if (!r.ok) return alert(r.error || 'Ошибка выставления счёта');
-      const { link, payload } = r;
+ async function buyStarsAndSpin(){
+-  const tg = window.Telegram?.WebApp;
+-  if (!tg){ alert('Откройте мини-приложение в Telegram'); return; }
+-  try{
++  const tg = window.Telegram?.WebApp;
++  try{
+     const r = await fetch('/stars/create', {
+       method:'POST', headers:{'content-type':'application/json'},
+       body: JSON.stringify({ userId: state.userId, amount: WSTATE.price })
+     }).then(r=>r.json());
+     if (!r.ok) return alert(r.error || 'Ошибка выставления счёта');
+     const { link, payload } = r;
+-
+-    let paid = false;
+-    tg.onEvent('invoiceClosed', (obj)=>{ if (obj.status==='paid') paid = true; });
+-    await tg.openInvoice(link);      // фиолетовое окно Stars
+-    if (!paid) return;                // пользователь отменил
++    // Попытка через SDK, если доступен
++    let paid = false, triedSDK = false;
++    if (tg && typeof tg.openInvoice === 'function'){
++      triedSDK = true;
++      const handler = (obj)=>{ if (obj.status==='paid') paid = true; };
++      tg.onEvent('invoiceClosed', handler);
++      try { await tg.openInvoice(link); } catch {}
++      tg.offEvent && tg.offEvent('invoiceClosed', handler);
++    }
++    // Если не внутри Telegram ИЛИ SDK не дал "paid" — открываем ссылкой (перекинет в Telegram)
++    if (!paid){
++      window.open(link, '_blank');    // Desktop/Browser → откроется Telegram
++      alert('После оплаты вернитесь в игру — мы проверим платёж и крутанём автоматически.');
++    }
+ 
+     const cr = await fetch('/stars/credit', {
+       method:'POST', headers:{'content-type':'application/json'},
+       body: JSON.stringify({ userId: state.userId, payload })
+     }).then(r=>r.json());
+ 
+     if (!cr.ok) return alert(cr.error || 'Оплата ещё не подтверждена, попробуйте позже');
+     WSTATE.stars = cr.stars|0; starsEl.textContent = WSTATE.stars;
+ 
+     wheelSpin(true);                  // авто-крутка
+   }catch{ alert('Ошибка сети'); }
+ }
 
-      let paid = false;
-      const handler = (obj)=>{ if (obj.status==='paid') paid = true; };
-      tg.onEvent('invoiceClosed', handler);
-
-      await tg.openInvoice(link);      // фиолетовое окно Stars
-
-      tg.offEvent('invoiceClosed', handler);
-      if (!paid) return;                // отменил
-
-      const cr = await fetch('/stars/credit', {
-        method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({ userId: state.userId, payload })
-      }).then(r=>r.json());
-
-      if (!cr.ok) return alert(cr.error || 'Оплата ещё не подтверждена, попробуйте позже');
-      WSTATE.stars = cr.stars|0; starsEl.textContent = WSTATE.stars;
-
-      wheelSpin(true);                  // авто-крутка
-    }catch{ alert('Ошибка сети'); }
-  }
 
   function wheelSpin(pay=true){
     if (WSTATE.spinning) return;
@@ -546,3 +559,4 @@
   wheelLoad();
 
 })();
+
