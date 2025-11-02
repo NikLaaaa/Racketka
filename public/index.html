@@ -2,11 +2,10 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Rocket To Sky</title>
   <link rel="icon" href="ton.png" />
-  <link rel="stylesheet" href="style.css?v=22" />
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css?v=20" />
   <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
 </head>
 <body class="dark">
@@ -23,13 +22,12 @@
 
     <div id="crashRow" class="crash-row"></div>
 
+    <!-- CRASH -->
     <main id="tabCrash" class="stage">
       <div class="centerHUD">
-        <div class="mult-wrap">
-          <span id="multVal" class="mult">1.00</span>
-          <span id="payoutTop" class="payout-top"></span>
-        </div>
+        <div id="multVal" class="mult">1.00</div>
         <div id="status" class="status">ожидание…</div>
+        <div id="payoutTop" class="payout-top"></div>
       </div>
 
       <div class="chart-wrap">
@@ -44,6 +42,21 @@
       </aside>
     </main>
 
+    <!-- WHEEL -->
+    <main id="tabWheel" class="wheel hidden">
+      <div class="wheel-stage">
+        <div class="pointer"></div>
+        <canvas id="wheelCanvas" width="520" height="520"></canvas>
+        <div id="wheelCenter" class="wheel-center">Ожидание</div>
+      </div>
+      <div class="wheel-controls">
+        <div class="stars">⭐ <span id="starsBalance">0</span></div>
+        <div class="slider-note">Цена спина: <b>50</b> ⭐</div>
+        <button id="wheelSpinBtn" class="btn primary">Крутить за 50 ⭐</button>
+      </div>
+    </main>
+
+    <!-- PROFILE -->
     <main id="tabProfile" class="profile hidden">
       <div class="profile-card">
         <img id="profileAva" class="profile-ava" alt="">
@@ -64,24 +77,18 @@
       <button id="cashoutBtn" class="btn cash">Забрать</button>
       <nav class="tabbar">
         <button id="navCrash" class="tbtn active">Crash</button>
+        <button id="navWheel" class="tbtn">Рулетка</button>
         <button id="navProfile" class="tbtn">Профиль</button>
       </nav>
     </footer>
   </div>
 
-  <!-- Модалка ставки -->
+  <!-- МОДАЛ СТАВКИ -->
   <div id="betModal" class="modal" aria-hidden="true">
     <div class="modal-box" tabindex="-1" id="betBox">
       <h3>Введите ставку (TON)</h3>
-      <input
-        id="modalBetInput"
-        type="text"
-        placeholder="например 1.00"
-        inputmode="decimal"
-        autocomplete="off"
-        autocapitalize="off"
-        spellcheck="false"
-      />
+      <input type="text" id="modalBetInput" placeholder="например 1.00"
+             inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false"/>
       <div class="modal-actions">
         <button id="modalConfirmBtn" class="btn primary">Поставить</button>
         <button id="modalClose" class="btn ghost">Отмена</button>
@@ -89,32 +96,6 @@
     </div>
   </div>
 
-  <script src="script.js?v=22"></script>
-  <!-- === РУЛЕТКА (кнопка открытия можно куда угодно) === -->
-<button id="openWheelBtn" class="tbtn" style="margin-top:10px;width:100%">Рулетка</button>
-
-<!-- === Модалка рулетки === -->
-<div id="wheelModal" class="modal" aria-hidden="true">
-  <div class="modal-box wheel-box" tabindex="-1">
-    <div class="wheel-header">
-      <div class="prize-pool">Призовой пул</div>
-      <div class="close-x" id="wheelClose">✕</div>
-    </div>
-
-    <div class="wheel-stage">
-      <div class="pointer"></div>
-      <canvas id="wheelCanvas" width="520" height="520"></canvas>
-      <div id="wheelCenter" class="wheel-center">Ожидание</div>
-    </div>
-
-    <div class="wheel-controls">
-      <div class="stars">⭐ <span id="starsBalance">0</span></div>
-      <div class="slider-note">Цена спина: <b>50</b> ⭐</div>
-      <button id="wheelSpinBtn" class="btn primary">Крутить за 50 ⭐</button>
-    </div>
-  </div>
-</div>
-
+  <script src="script.js?v=20"></script>
 </body>
 </html>
-
