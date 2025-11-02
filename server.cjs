@@ -31,7 +31,6 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// ===== static & json =====
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -85,6 +84,7 @@ app.get('/_health', (_req,res)=>res.json({ok:true}));
 // ===================================================================
 // === GETGEMS GIFTS (cache 5min, limit 200, auto-discovery + fallback)
 // ===================================================================
+
 const GETGEMS_GQL       = 'https://api.getgems.io/graphql';
 const GIFTS_CACHE_TTL   = 300_000; // 5 минут
 const GIFTS_LIMIT       = 200;
@@ -111,15 +111,122 @@ const FALLBACK_COLLECTIONS = (process.env.GIFT_COLLECTIONS
 
 const keepAliveAgent = new https.Agent({ keepAlive: true });
 
-// ==== gqlRequest, FETCH GIFTS, DISCOVERY ... ====
-// (🟢 Этот блок полностью оставлен без изменений)
-// (вмещается ограничение сообщения — не буду дублировать его полностью, у тебя он ок)
+async function gqlRequest(query, variables, { retries = 3, timeoutMs = 12000 } = {}) {
+  const body = JSON.stringify({ query, variables });
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const ctrl = new AbortController();
+      const tId = setTimeout(() => ctrl.abort(), timeoutMs);
+      const r = await fetch(GETGEMS_GQL, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'accept': 'application/json',
+          'origin':  'https://getgems.io',
+          'referer': 'https://getgems.io/',
+          'user-agent': 'Mozilla/5.0'
+        },
+        body,
+        agent: keepAliveAgent,
+        signal: ctrl.signal
+      });
+      clearTimeout(tId);
+      if (!r.ok) {
+        if (attempt < retries) { await new Promise(res=>setTimeout(res, 400*attempt)); continue; }
+        throw new Error('Getgems HTTP '+r.status);
+      }
+      const js = await r.json();
+      if (js.errors) {
+        if (attempt < retries) { await new Promise(res=>setTimeout(res, 400*attempt)); continue; }
+        throw new Error('Getgems GraphQL errors');
+      }
+      return js.data;
+    } catch(e){
+      if (attempt >= retries) throw e;
+      await new Promise(res=>setTimeout(res, 400*attempt));
+    }
+  }
+}
 
+const GQL_FIND_COLLECTIONS = `
+query FindGiftCollections($q: String!, $limit: Int!) {
+  collections(filter: { search: $q }, orderBy: { field: VOLUME, direction: DESC }, first: $limit) {
+    edges { node { address name } }
+  }
+}`;
+const GQL_COLLECTION_ITEMS = `
+query Gifts($address: String!, $limit: Int!) {
+  items(filter: { collectionAddress: $address }, orderBy: { field: PRICE, direction: ASC }, first: $limit) {
+    edges { node { address name image { url } bestListing { priceTon } lastSale { priceTon } } }
+  }
+}`;
+const GQL_PING = `query Ping { stats { tvlTon } }`;
+
+async function discoverGiftCollections() {
+  const KEYS = ['gift','gifts','telegram gifts','tg gifts','present','ring','heart','bouquet'];
+  const seen = new Set(); const out = []; const LIMIT = 40;
+  for (const q of KEYS) {
+    try {
+      const data = await gqlRequest(GQL_FIND_COLLECTIONS, { q, limit: 20 });
+      const edges = data?.collections?.edges || [];
+      for (const e of edges) {
+        const addr = e?.node?.address;
+        if (!addr || seen.has(addr)) continue;
+        seen.add(addr); out.push(addr);
+        if (out.length >= LIMIT) return out;
+      }
+    } catch {}
+  }
+  return out;
+}
+async function fetchCollectionGifts(address, limit=200){
+  const data = await gqlRequest(GQL_COLLECTION_ITEMS, { address, limit });
+  const edges = data?.items?.edges || [];
+  const items = edges.map(e=>{
+    const n = e?.node || {};
+    const priceTon = Number(n?.bestListing?.priceTon ?? 0) || Number(n?.lastSale?.priceTon ?? 0) || 0;
+    return { id:n.address, name:n.name||'Gift', priceTon, img:n?.image?.url||'', _col:address };
+  });
+  return items.filter(x=>x.img && x.priceTon>0).sort((a,b)=>a.priceTon-b.priceTon);
+}
+async function fetchAllGifts(){
+  let collections = [];
+  try { collections = await discoverGiftCollections(); } catch {}
+  if (!collections.length) collections = FALLBACK_COLLECTIONS;
+  const perCol = Math.max(1, Math.floor(GIFTS_LIMIT / collections.length));
+  const res = await Promise.allSettled(collections.map(addr=>fetchCollectionGifts(addr, perCol)));
+  const merged = [];
+  for (const r of res) if (r.status==='fulfilled') merged.push(...r.value);
+  const seen = new Set(), unique=[];
+  for (const it of merged){ if (seen.has(it.id)) continue; seen.add(it.id); unique.push(it); }
+  return unique.filter(x=>x.priceTon>0).sort((a,b)=>a.priceTon-b.priceTon).slice(0, GIFTS_LIMIT);
+}
+
+app.get('/gems_health', async (_req,res)=>{
+  try { const data = await gqlRequest(GQL_PING, {}); res.json({ok:true, data}); }
+  catch(e){ res.status(500).json({ok:false, error:String(e.message||e)}); }
+});
+app.get('/gifts', async (_req,res)=>{
+  try{
+    const now = Date.now();
+    if (now - giftsCache.ts < GIFTS_CACHE_TTL && giftsCache.items.length) {
+      return res.json({ ok:true, items:giftsCache.items });
+    }
+    const items = await fetchAllGifts();
+    giftsCache = { ts: Date.now(), items };
+    res.json({ ok:true, items });
+  }catch(e){
+    console.error('[/gifts] error', e);
+    res.status(500).json({ ok:false, error:'getgems fetch failed' });
+  }
+});
 
 // ===== GAME =====
 let online = 0;
 let currentMultiplier = 1.0;
-let phase = 'idle'; // betting/running/finished
+let phase = 'idle'; // betting / running / finished
+let bettingEndsAt = 0; // <<< ВАЖНО
+
 const clients = new Map(); // ws -> { userId, bet, cashed, nick, avatar }
 
 function broadcast(obj){
@@ -127,28 +234,29 @@ function broadcast(obj){
   wss.clients.forEach(c => (c.readyState===1) && c.send(msg));
 }
 
-// ✅ FIX — startRound
 function startRound(){
   phase = 'betting';
   currentMultiplier = 1.0;
 
-  for (const st of clients.values()) {
-    st.bet = 0;
-    st.cashed = false;
-  }
+  // сброс ставок прошлого раунда
+  for (const st of clients.values()) { st.bet = 0; st.cashed = false; }
 
-  broadcast({ type: 'round_betting' });
+  // таймер ставок (5 сек)
+  bettingEndsAt = Date.now() + 5000;
+  broadcast({ type:'round_start', bettingEndsAt });
 
-  setTimeout(runFlight, 3000);
+  setTimeout(runFlight, Math.max(0, bettingEndsAt - Date.now()));
 }
 
 function runFlight(){
   phase='running';
   broadcast({ type:'round_running' });
+
   const tick = ()=>{
     if (phase!=='running') return;
-    currentMultiplier = +(currentMultiplier+0.02).toFixed(2);
+    currentMultiplier = +(currentMultiplier + 0.02).toFixed(2);
     broadcast({ type:'multiplier', multiplier: currentMultiplier });
+
     const pCrash = Math.min(0.02 + (currentMultiplier-1)*0.02, 0.40);
     if (Math.random()<pCrash || currentMultiplier>=9.91) endRound(currentMultiplier);
     else setTimeout(tick, Math.max(10, 140 - (currentMultiplier-1)*45));
@@ -176,6 +284,7 @@ wss.on('connection', async (ws, req)=>{
   if (db.balances[userId]==null) db.balances[userId]=0;
   await saveDB(db);
 
+  // первичная инициализация
   ws.send(JSON.stringify({
     type:'init',
     balance: Number(db.balances[userId]||0),
@@ -186,6 +295,14 @@ wss.on('connection', async (ws, req)=>{
   }));
   broadcast({ type:'online', online });
 
+  // <<< ДОШЛЁМ ТЕКУЩЕЕ СОСТОЯНИЕ РАУНДА НОВОМУ КЛИЕНТУ
+  if (phase === 'betting') {
+    ws.send(JSON.stringify({ type:'round_start', bettingEndsAt }));
+  } else if (phase === 'running') {
+    ws.send(JSON.stringify({ type:'round_running' }));
+    ws.send(JSON.stringify({ type:'multiplier', multiplier: currentMultiplier }));
+  }
+
   ws.on('message', async raw=>{
     let d; try{ d = JSON.parse(raw.toString()); }catch{ return; }
     const st = clients.get(ws); if (!st) return;
@@ -195,6 +312,7 @@ wss.on('connection', async (ws, req)=>{
       st.avatar = d.profile?.avatar || null;
       return;
     }
+
     if (d.type==='place_bet' && phase==='betting'){
       const amt = Number(d.amount||0);
       if (!(amt>=0.10)) {
@@ -215,6 +333,7 @@ wss.on('connection', async (ws, req)=>{
       }
       return;
     }
+
     if (d.type==='cashout' && phase==='running' && st.bet>0 && !st.cashed){
       const payout = +(st.bet * currentMultiplier * 0.98).toFixed(2);
       const db = await dbPromise;
