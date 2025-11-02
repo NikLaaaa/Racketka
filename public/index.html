@@ -2,10 +2,13 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Rocket To Sky</title>
   <link rel="icon" href="ton.png" />
-  <link rel="stylesheet" href="style.css?v=17" />
+  <link rel="stylesheet" href="style.css?v=18" />
+  <!-- Telegram Mini Apps API (для ника и авы) -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- TonConnect UI -->
   <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
 </head>
 <body class="dark">
@@ -68,12 +71,19 @@
     </footer>
   </div>
 
+  <!-- Модалка ставки -->
   <div id="betModal" class="modal" aria-hidden="true">
     <div class="modal-box" tabindex="-1" id="betBox">
       <h3>Введите ставку (TON)</h3>
-      <input type="number" id="modalBetInput" placeholder="например 1.00"
-             min="0.01" step="0.01" inputmode="decimal"
-             autocomplete="off" autocapitalize="off" spellcheck="false"/>
+      <input
+        id="modalBetInput"
+        type="text"
+        placeholder="например 1.00"
+        inputmode="decimal"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+      />
       <div class="modal-actions">
         <button id="modalConfirmBtn" class="btn primary">Поставить</button>
         <button id="modalClose" class="btn ghost">Отмена</button>
@@ -81,6 +91,6 @@
     </div>
   </div>
 
-  <script src="script.js?v=17"></script>
+  <script src="script.js?v=18"></script>
 </body>
 </html>
