@@ -9,6 +9,7 @@
   const balanceNumEl = $('#balanceNum');
   const multEl = $('#multVal');
   const statusEl = $('#status');
+  const profitEl = $('#profitHint');
 
   const playersList = $('#playersList');
   const roundTotal = $('#roundTotal');
@@ -142,7 +143,6 @@
       let photo = null;
 
       if (u) {
-        // именно отображаемое имя
         const composed = [u.first_name, u.last_name].filter(Boolean).join(' ');
         displayName = composed || (u.username ? `@${u.username}` : 'User');
         if (u.photo_url) photo = u.photo_url;
@@ -208,14 +208,16 @@
         setBalance(d.balance ?? state.balance);
         betBtn.disabled = true;
         cashoutBtn.disabled = false;
-        cashoutBtn.classList.add('active','pulse');
+        cashoutBtn.classList.add('active','pulse','armed');
+        updateProfitHint();
         break;
 
       case 'cashout_result':
         setBalance(d.balance ?? state.balance);
         state.myBet = 0; state.myCashed = true;
         cashoutBtn.disabled = true;
-        cashoutBtn.classList.remove('active','pulse');
+        cashoutBtn.classList.remove('active','pulse','armed');
+        profitEl.textContent = '';
         break;
 
       case 'error':
@@ -237,6 +239,21 @@
     state.displayedMult = m;
     multEl.textContent = m.toFixed(2);
     pushPoint(m);
+    updateProfitHint();
+  }
+
+  function updateProfitHint(){
+    const HOUSE = 0.98; // комиссия дома (как на сервере)
+    const bet = state.myBet || 0;
+    const k = state.displayedMult || 1;
+    const profit = Math.max(0, bet * k * HOUSE - bet);
+    if (bet > 0 && state.roundState === 'running' && profit > 0) {
+      profitEl.textContent = `+${profit.toFixed(2)}`;
+    } else {
+      profitEl.textContent = '';
+    }
+    const armed = bet > 0 && state.roundState === 'running';
+    cashoutBtn.classList.toggle('armed', armed);
   }
 
   function renderHistory(){
@@ -276,7 +293,10 @@
     for (const [,p] of players){
       const row = document.createElement('div'); row.className='player';
       row.innerHTML = `
-        <div class="pname">${esc(p.nick||'User')}</div>
+        <div class="pinfo">
+          ${p.avatar ? `<img class="pava" src="${esc(p.avatar)}" alt="">` : `<div class="pava pava--ph"></div>`}
+          <div class="pname">${esc(p.nick||'User')}</div>
+        </div>
         <div class="pval ${p.cashed ? 'good' : ''}">
           ${p.cashed ? `+${(p.payout||0).toFixed(2)}` : (p.amount ? (p.amount||0).toFixed(2) : '')}
         </div>`;
@@ -290,20 +310,17 @@
     state.roundState='betting';
     state.myBet=0; state.myCashed=false;
 
-    // СБРОС ВСЕГО, чтобы инпут всегда работал после раннего клика:
     placingBet = false;
     closeModal(betModal);
     modalBetInput.value = '';
     modalBetInput.disabled = false;
 
-    // Убедимся, что у инпута тип/атрибуты правильные (некоторые бразуеры ломают через кэш):
     modalBetInput.setAttribute('type','text');
     modalBetInput.setAttribute('inputmode','decimal');
     modalBetInput.setAttribute('autocomplete','off');
     modalBetInput.setAttribute('autocapitalize','off');
     modalBetInput.setAttribute('spellcheck','false');
 
-    // график
     series = [{x:0,y:1}];
     drawChart();
 
@@ -311,7 +328,8 @@
     statusEl.textContent='ставки…';
     betBtn.disabled=false;
     cashoutBtn.disabled=true;
-    cashoutBtn.classList.remove('active','pulse');
+    cashoutBtn.classList.remove('active','pulse','armed');
+    profitEl.textContent = '';
     clearPlayers();
 
     let sec = Math.max(0, Math.round((d.bettingEndsAt - Date.now())/1000));
@@ -332,6 +350,7 @@
       cashoutBtn.disabled=false;
       cashoutBtn.classList.add('active','pulse');
     }
+    updateProfitHint();
   }
 
   function onRoundEnd(d){
@@ -340,6 +359,8 @@
     const final = Number(d.result||1);
     setMult(final);
     statusEl.textContent='КРАШ';
+    cashoutBtn.classList.remove('armed');
+    profitEl.textContent = '';
     setTimeout(()=>{
       setMult(1.00);
       statusEl.textContent='ожидание…';
@@ -370,11 +391,9 @@
       el.style.display='flex';
       document.body.classList.add('modal-open');
     }
-    // защита от «пролёта» кликов
     modalBox?.addEventListener('click', (e)=> e.stopPropagation());
     el.addEventListener('click', (e)=>{ if (e.target===el) closeModal(el); });
 
-    // всегда разблокируем поле и ставим фокус
     modalBetInput.disabled = false;
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -419,7 +438,6 @@
       ws.send(JSON.stringify({ type:'place_bet', amount: amt }));
       closeModal(betModal);
     } finally {
-      // быстро сбрасываем флаг, чтобы следующий раунд не «ломал» ввод
       setTimeout(()=> placingBet=false, 500);
     }
   });
@@ -493,7 +511,7 @@
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
 
-  // safety: wheel на number-инпутах (если где-то остался) — блок
+  // safety
   modalBetInput?.addEventListener('wheel', e => e.preventDefault(), { passive:false });
 
   // лог ошибок
