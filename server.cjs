@@ -229,3 +229,5 @@ async function pollTonCenter(){
     startRound();
   });
 })();
+require('./bot.cjs');
+
