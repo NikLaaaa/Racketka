@@ -597,3 +597,241 @@
   modalBetInput?.addEventListener('wheel', e => e.preventDefault(), { passive:false });
   window.addEventListener('error', (e)=> console.error('JS Error:', e.message));
 })();
+// ================== WHEEL (Roulette: 5 NFT, 2 No Loot, 1 Re-roll) ==================
+(() => {
+  const openBtn   = document.querySelector('#openWheelBtn');
+  const modal     = document.querySelector('#wheelModal');
+  const closeBtn  = document.querySelector('#wheelClose');
+  const canvas    = document.querySelector('#wheelCanvas');
+  const centerLbl = document.querySelector('#wheelCenter');
+  const spinBtn   = document.querySelector('#wheelSpinBtn');
+  const starsEl   = document.querySelector('#starsBalance');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+
+  const WSTATE = {
+    stars: 250,   // демо-баланс ⭐ (подключи к бэку при желании)
+    price: 50,    // стоимость спина
+    sectors: [],  // {type:'gift'|'none'|'reroll', name, img, color}
+    angle: 0,
+    spinning: false,
+    rerollOnce: false, // чтобы не зациклиться: один бесплатный ре-ролл за выпадение reroll
+  };
+  starsEl.textContent = WSTATE.stars;
+
+  const COLORS = ['#ffd43b','#5b46ff','#24c2a6','#74f0ff','#ff7b7b','#202733','#111821','#6e42ff'];
+
+  async function loadWheel(){
+    // берём /gifts и берём первые 5 NFT
+    let gifts = [];
+    try{
+      const r = await fetch('/gifts', { cache:'no-store' });
+      const js = await r.json();
+      gifts = (js.items||[])
+        .filter(x => x.img && x.name)
+        .sort((a,b)=>a.priceTon-b.priceTon)
+        .slice(0,5)
+        .map((g,i)=>({ type:'gift', name:g.name, img:g.img, color: COLORS[i%COLORS.length] }));
+    }catch(e){ /* ignore */ }
+
+    // если не пришло — заглушки
+    if (gifts.length < 5){
+      while (gifts.length < 5) {
+        const i = gifts.length;
+        gifts.push({ type:'gift', name:`Gift #${i+1}`, img:'', color: COLORS[i%COLORS.length] });
+      }
+    }
+
+    // собираем 8 секторов: 5 gifts, 2 no-loot, 1 reroll
+    const noLoot = { type:'none',   name:'No Loot', img:'', color:'#1c2433' };
+    const reroll = { type:'reroll', name:'Re-roll', img:'', color:'#ffb703' };
+
+    WSTATE.sectors = [
+      gifts[0], noLoot,
+      gifts[1], gifts[2],
+      reroll,
+      gifts[3], noLoot,
+      gifts[4],
+    ];
+    renderWheel();
+  }
+
+  // utils
+  function rad(d){ return d*Math.PI/180; }
+
+  function renderWheel(){
+    const { width:w, height:h } = canvas;
+    const cx=w/2, cy=h/2, R = Math.min(cx,cy)-6;
+    ctx.clearRect(0,0,w,h);
+
+    const N = WSTATE.sectors.length;
+    const step = Math.PI*2 / N;
+
+    ctx.save();
+    ctx.translate(cx,cy);
+    ctx.rotate(WSTATE.angle);
+
+    for (let i=0;i<N;i++){
+      const a0 = i*step, a1=(i+1)*step;
+      const sec = WSTATE.sectors[i];
+
+      // сектор
+      ctx.beginPath(); ctx.moveTo(0,0);
+      ctx.arc(0,0,R, a0, a1, false);
+      ctx.closePath();
+      ctx.fillStyle = sec.color || COLORS[i%COLORS.length];
+      ctx.fill();
+
+      // бордер
+      ctx.strokeStyle = '#0b1119';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0,0,R, a1-0.002, a1+0.002);
+      ctx.stroke();
+
+      // контент
+      const mid = (a0+a1)/2;
+      const rIcon = R*0.68;
+      const x = Math.cos(mid) * rIcon;
+      const y = Math.sin(mid) * rIcon;
+
+      ctx.save();
+      ctx.translate(x,y);
+      ctx.rotate(mid + Math.PI/2);
+
+      if (sec.type === 'gift'){
+        drawIcon(sec.img, -24, -24, 48, 48, 10);
+      } else if (sec.type === 'none'){
+        drawPill('No Loot');
+      } else if (sec.type === 'reroll'){
+        drawPill('Re-roll 🔄', true);
+      }
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  // округлённая картинка
+  const cacheImgs = new Map();
+  function drawIcon(src, x,y,w,h,r){
+    if (!src) { drawPill('Gift'); return; }
+    let img = cacheImgs.get(src);
+    if (!img){
+      img = new Image(); img.crossOrigin = "anonymous"; img.src = src;
+      cacheImgs.set(src,img); img.onload = () => renderWheel();
+    }
+    if (!img.complete) { drawPill('…'); return; }
+
+    ctx.save();
+    const rr = Math.min(r,w/2,h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+rr, y);
+    ctx.arcTo(x+w, y,   x+w, y+h, rr);
+    ctx.arcTo(x+w, y+h, x,   y+h, rr);
+    ctx.arcTo(x,   y+h, x,   y,   rr);
+    ctx.arcTo(x,   y,   x+w, y,   rr);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(img, x, y, w, h);
+    ctx.restore();
+  }
+
+  function drawPill(text, accent=false){
+    ctx.font = '700 14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+    const padX=12, padY=8;
+    const m = ctx.measureText(text);
+    const w = m.width + padX*2, h = 30;
+    ctx.fillStyle = accent ? '#2d7dff' : '#111a28';
+    ctx.strokeStyle = accent ? '#8bb6ff' : '#25324a';
+    ctx.lineWidth = 2;
+    roundRect(-w/2,-h/2,w,h,12,true,true);
+    ctx.fillStyle = '#dbe7ff';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(text, 0, 1);
+  }
+  function roundRect(x,y,w,h,r,fill,stroke){
+    const rr = Math.min(r,w/2,h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+rr, y);
+    ctx.arcTo(x+w, y,   x+w, y+h, rr);
+    ctx.arcTo(x+w, y+h, x,   y+h, rr);
+    ctx.arcTo(x,   y+h, x,   y,   rr);
+    ctx.arcTo(x,   y,   x+w, y,   rr);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
+  }
+
+  function open(){ modal.classList.add('open'); modal.style.display='flex'; document.body.classList.add('modal-open'); renderWheel(); }
+  function close(){ modal.classList.remove('open'); modal.style.display='none'; document.body.classList.remove('modal-open'); }
+
+  openBtn?.addEventListener('click', open);
+  closeBtn?.addEventListener('click', close);
+  modal?.addEventListener('click', (e)=>{ if (e.target===modal) close(); });
+
+  // Анимация спина с ease-out и логикой исхода
+  function spin(pay=true){
+    if (WSTATE.spinning) return;
+    if (pay && WSTATE.stars < WSTATE.price) { alert('Недостаточно ⭐'); return; }
+    if (pay){ WSTATE.stars -= WSTATE.price; starsEl.textContent = WSTATE.stars; }
+
+    WSTATE.spinning = true;
+    centerLbl.textContent = 'Крутим…';
+
+    const N = WSTATE.sectors.length;
+    const step = (Math.PI*2)/N;
+
+    const targetIndex = Math.floor(Math.random()*N);
+    const targetAngle = (Math.PI/2) - (targetIndex*step + step/2); // указатель сверху
+
+    const current = ((WSTATE.angle%(Math.PI*2))+Math.PI*2)%(Math.PI*2);
+    const baseTurns = Math.PI*2 * (5 + Math.random()*2);
+    let delta = baseTurns + (targetAngle - current);
+    while (delta < Math.PI*2*3) delta += Math.PI*2;
+
+    const duration = 2600 + Math.random()*600;
+    const t0 = performance.now();
+
+    requestAnimationFrame(function frame(t){
+      const p = Math.min(1, (t - t0) / duration);
+      const ease = 1 - Math.pow(1-p, 5);
+      WSTATE.angle = current + delta * ease;
+      renderWheel();
+      if (p < 1) requestAnimationFrame(frame);
+      else onSpinEnd(targetIndex);
+    });
+  }
+
+  function onSpinEnd(idx){
+    WSTATE.spinning = false;
+    const sec = WSTATE.sectors[idx];
+
+    if (sec.type === 'gift'){
+      centerLbl.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+        <img class="wheel-icon" src="${sec.img}" alt="">
+        <b>${sec.name}</b>
+      </div>`;
+    } else if (sec.type === 'none'){
+      centerLbl.textContent = 'Пусто 🙈';
+    } else { // reroll
+      centerLbl.textContent = 'Re-roll! 🔄';
+      if (!WSTATE.rerollOnce){
+        WSTATE.rerollOnce = true;    // один бесплатный реролл
+        setTimeout(()=> spin(false), 600);
+        return;
+      } else {
+        // если уже делали бесплатный реролл — больше не повторяем
+        WSTATE.rerollOnce = false;
+      }
+    }
+  }
+
+  spinBtn?.addEventListener('click', ()=>{ if (!WSTATE.spinning) { WSTATE.rerollOnce=false; spin(true); } });
+
+  // init
+  loadWheel();
+})();
+
+
