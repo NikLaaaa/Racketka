@@ -354,7 +354,7 @@
       sec--;
       statusEl.textContent = sec<=0 ? 'готовность' : `ставки: ${sec}s`;
       if (sec<=0) clearInterval(iv);
-    },5000);
+    },1000);
   }
 
   function onRoundRunning(){
@@ -534,4 +534,5 @@
   modalBetInput?.addEventListener('wheel', e => e.preventDefault(), { passive:false });
   window.addEventListener('error', (e)=> console.error('JS Error:', e.message));
 })();
+
 
