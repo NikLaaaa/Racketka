@@ -375,7 +375,7 @@ wss.on('connection', async (ws, req)=>{
       const bal = Number(db.balances[st.userId]||0);
       if (amt>0 && bal>=amt){
         db.balances[st.userId] = +(bal-amt);
-        st.bet = +(st.bet + amt);
+        st.bet = amt;
         st.cashed=false;
         await saveDB(db);
         ws.send(JSON.stringify({ type:'bet_confirm', amount: amt, balance: db.balances[st.userId] }));
@@ -453,3 +453,4 @@ async function pollTonCenter(){
   });
 })();
 try { require('./bot.cjs'); } catch { /* опционально */ }
+
