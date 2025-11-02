@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Rocket To Sky</title>
+  <link rel="icon" href="ton.png" />
+  <link rel="stylesheet" href="style.css?v=16" />
+  <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+</head>
+<body class="dark">
+  <div class="wrap">
+    <header class="topbar">
+      <div class="pill online"><span class="dot"></span><span id="onlineVal">0</span></div>
+      <div class="spacer"></div>
+      <div class="pill balance">
+        <img src="ton.png" alt="">
+        <span id="balanceNum">0.00</span>
+        <button id="depositBtn" class="icon-btn" title="Пополнить">+</button>
+      </div>
+    </header>
+
+    <div id="crashRow" class="crash-row"></div>
+
+    <main id="tabCrash" class="stage">
+      <div class="centerHUD">
+        <div id="multVal" class="mult">1.00</div>
+        <div id="status" class="status">ожидание…</div>
+      </div>
+
+      <div class="chart-wrap">
+        <canvas id="chartCanvas"></canvas>
+      </div>
+
+      <div class="cta"><button id="betBtn" class="btn primary">Сделать ставку</button></div>
+
+      <aside class="players">
+        <div class="players-head"><span>Игроки</span><span id="roundTotal"></span></div>
+        <div id="playersList" class="players-list"></div>
+      </aside>
+    </main>
+
+    <main id="tabProfile" class="profile hidden">
+      <div class="profile-card">
+        <img id="profileAva" class="profile-ava" alt="">
+        <div class="profile-name" id="profileName">–</div>
+        <div class="profile-balance"><img src="ton.png" alt=""><span id="profileBalance">0.00</span></div>
+      </div>
+
+      <div class="profile-actions">
+        <div id="ton-connect"></div>
+        <button id="withdrawBtn" class="btn">Вывести</button>
+        <button id="disconnectBtn" class="btn ghost">Отвязать кошелёк</button>
+      </div>
+
+      <div id="walletInfo" class="wallet-info hidden"></div>
+    </main>
+
+    <footer class="footer">
+      <button id="cashoutBtn" class="btn cash">Забрать</button>
+      <nav class="tabbar">
+        <button id="navCrash" class="tbtn active">Crash</button>
+        <button id="navProfile" class="tbtn">Профиль</button>
+      </nav>
+    </footer>
+  </div>
+
+  <div id="betModal" class="modal" aria-hidden="true">
+    <div class="modal-box" tabindex="-1" id="betBox">
+      <h3>Введите ставку (TON)</h3>
+      <input type="number" id="modalBetInput" placeholder="например 1.00"
+             min="0.01" step="0.01" inputmode="decimal"
+             autocomplete="off" autocapitalize="off" spellcheck="false"/>
+      <div class="modal-actions">
+        <button id="modalConfirmBtn" class="btn primary">Поставить</button>
+        <button id="modalClose" class="btn ghost">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js?v=16"></script>
+</body>
+</html>
