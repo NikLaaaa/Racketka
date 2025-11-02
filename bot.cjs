@@ -1,3 +1,4 @@
+// bot.js — WebApp + /give1000 + /give <id> <amount>
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const fetch = global.fetch || require('node-fetch');
@@ -6,10 +7,16 @@ const TOKEN = process.env.BOT_TOKEN;
 const SERVER_URL = (process.env.SERVER_URL || 'http://localhost:3000').replace(/\/$/,'');
 const ADMIN_ID = String(process.env.ADMIN_ID || '');
 const SECRET_KEY = process.env.SECRET_KEY || 'supersecret';
+const WELCOME_IMAGE_PATH = './public/welcome.jpg'; // 👈 положи картинку сюда (необязательно)
 
 if (!TOKEN) { console.error('BOT_TOKEN missing'); process.exit(1); }
 
 const bot = new TelegramBot(TOKEN, { polling: true });
+
+// ---------- utils ----------
+function escapeHtml(s='') {
+  return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+}
 
 async function safeJSON(res){
   const t = await res.text();
@@ -33,36 +40,51 @@ async function grant(userId, amount){
   }
 }
 
-// ---------- красивое приветствие ----------
-bot.onText(/\/start/, msg=>{
-  const name = msg.from.first_name || 'друг';
-  const url = `${SERVER_URL}/?userId=${msg.from.id}`;
+// ---------- /start (картинка при наличии + кнопка "Открыть игру") ----------
+bot.onText(/\/start(?:\s+(.+))?/, async (msg, m) => {
+  const chatId = msg.chat.id;
+  const name = [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') || 'друг';
+  const ref = m?.[1] ? `&startapp=${encodeURIComponent(m[1])}` : '';
+  const url = `${SERVER_URL}/?userId=${msg.from.id}${ref}`;
 
-  const text =
-    `✨ <b>Привет, ${name}!</b>\n\n` +
-    `Желаю тебе сорвать крупный выигрыш в нашем казино 🚀💰\n` +
-    `Удача сегодня явно на твоей стороне 😉`;
+  const caption =
+    `✨ <b>Привет, ${escapeHtml(name)}!</b>\n\n` +
+    `Желаю тебе сорвать крупный выигрыш в нашем казино 🚀💰`;
 
-  bot.sendMessage(msg.chat.id, text, {
-    parse_mode: 'HTML',
-    reply_markup:{
-      inline_keyboard:[
-        [{ text:'🎮 Открыть игру', web_app:{ url } }]
-      ]
-    }
-  });
+  const keyboard = {
+    inline_keyboard: [
+      [{ text:'🚀 Открыть игру', web_app:{ url } }]
+    ]
+  };
+
+  try {
+    // пробуем отправить фото-обложку; если файла нет, свалимся в catch и отправим текст
+    await bot.sendPhoto(chatId, WELCOME_IMAGE_PATH, {
+      caption,
+      parse_mode: 'HTML',
+      reply_markup: keyboard
+    });
+  } catch (e) {
+    await bot.sendMessage(chatId, caption, {
+      parse_mode: 'HTML',
+      reply_markup: keyboard,
+      disable_web_page_preview: true
+    });
+  }
 });
 
 // ---------- /give1000 ----------
-bot.onText(/\/give1000/, async msg=>{
-  if (String(msg.from.id)!==ADMIN_ID) return bot.sendMessage(msg.chat.id,'🚫 Нет прав');
+bot.onText(/\/give1000/, async (msg)=>{
+  if (String(msg.from.id)!==ADMIN_ID)
+    return bot.sendMessage(msg.chat.id,'🚫 Нет прав');
   const r = await grant(msg.from.id, 1000);
   bot.sendMessage(msg.chat.id, r.ok ? `✅ Баланс: ${r.balance}` : `❌ ${r.error}`);
 });
 
 // ---------- /give <id> <amount> ----------
 bot.onText(/\/give (\d+) (\d+(\.\d+)?)/, async (msg, m)=>{
-  if (String(msg.from.id)!==ADMIN_ID) return bot.sendMessage(msg.chat.id,'🚫 Нет прав');
+  if (String(msg.from.id)!==ADMIN_ID)
+    return bot.sendMessage(msg.chat.id,'🚫 Нет прав');
   const r = await grant(m[1], Number(m[2]));
   bot.sendMessage(
     msg.chat.id,
@@ -72,4 +94,5 @@ bot.onText(/\/give (\d+) (\d+(\.\d+)?)/, async (msg, m)=>{
   );
 });
 
+// ---------- log ----------
 console.log('🤖 Bot polling started…');
