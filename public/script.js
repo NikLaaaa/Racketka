@@ -68,17 +68,27 @@
     try{
       const r = await fetch('/gifts', { cache:'no-store' });
       const js = await r.json();
-      GIFTS = Array.isArray(js.items) ? js.items.filter(x => x.img && Number(x.priceTon) > 0).sort((a,b)=>a.priceTon-b.priceTon) : [];
-    }catch(e){ console.warn('gifts load error', e); }
+      GIFTS = Array.isArray(js.items)
+        ? js.items
+            .map(x => ({ ...x, priceTon: Number(x.priceTon) || 0 }))
+            .filter(x => x.img && x.priceTon > 0)
+            .sort((a,b)=>a.priceTon-b.priceTon)
+        : [];
+      // после загрузки сразу перерисуем
+      renderPlayers();
+      updateTopPayout();
+    }catch(e){ /* тихо */ }
   }
   loadGifts();
   setInterval(loadGifts, 300_000);
 
   function pickGift(amountTon){
     if (!GIFTS.length || !amountTon) return null;
+    const a = Number(amountTon) || 0;
     let best = null;
     for (const g of GIFTS){
-      if (amountTon + 1e-9 >= Number(g.priceTon)) best = g; else break;
+      const p = Number(g.priceTon) || 0;
+      if (a + 1e-9 >= p) best = g; else break;
     }
     return best;
   }
@@ -248,7 +258,7 @@
     multEl.textContent = m.toFixed(2);
     pushPoint(m);
     updateTopPayout();
-    renderPlayers(); // чтобы подарки у игроков пересчитывались в реальном времени
+    renderPlayers(); // пересчёт подарков в реальном времени
   }
 
   function updateTopPayout(){
@@ -316,10 +326,12 @@
         ? `<div class="pgift"><img src="${gift.img}" alt="${esc(gift.name)}"><span>${esc(gift.name)} • ${amountTon.toFixed(2)} TON</span></div>`
         : (amountTon>0 ? `<div class="pgift">≈ ${amountTon.toFixed(2)} TON</div>` : '');
 
+      const ava = p.avatar ? `<img class="pava" src="${esc(p.avatar)}" alt="">` : `<div class="pava pava--ph"></div>`;
+
       const row = document.createElement('div'); row.className='player';
       row.innerHTML = `
         <div class="pinfo">
-          ${p.avatar ? `<img class="pava" src="${esc(p.avatar)}" alt="">` : `<div class="pava pava--ph"></div>`}
+          ${ava}
           <div class="pname">${esc(p.nick||'User')}</div>
         </div>
         <div class="pval ${p.cashed ? 'good' : ''}">
@@ -331,7 +343,7 @@
     roundTotal.textContent = total ? `${total.toFixed(2)} TON` : '';
   }
 
-  // ==== guaranteed focusable input ====
+  // ==== focusable input (фикс бага) ====
   function ensureBetInputReady(initialValue = ''){
     if (!modalBetInput) return;
     modalBetInput.setAttribute('type','text');
