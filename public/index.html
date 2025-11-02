@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Rocket To Sky</title>
   <link rel="icon" href="ton.png" />
-  <link rel="stylesheet" href="style.css?v=16" />
+  <link rel="stylesheet" href="style.css?v=17" />
   <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
 </head>
 <body class="dark">
@@ -24,7 +24,10 @@
 
     <main id="tabCrash" class="stage">
       <div class="centerHUD">
-        <div id="multVal" class="mult">1.00</div>
+        <div class="mult-wrap">
+          <span id="multVal" class="mult">1.00</span>
+          <span id="profitHint" class="profit"></span>
+        </div>
         <div id="status" class="status">ожидание…</div>
       </div>
 
@@ -78,6 +81,6 @@
     </div>
   </div>
 
-  <script src="script.js?v=16"></script>
+  <script src="script.js?v=17"></script>
 </body>
 </html>
