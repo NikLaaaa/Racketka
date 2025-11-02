@@ -43,7 +43,6 @@
   const ctx = chartCanvas?.getContext?.('2d');
 
   // ==== constants ====
-  // Минималка убрана — проверяем только > 0
   const HOUSE = 0.98;
 
   // ==== state ====
@@ -157,8 +156,8 @@
         renderHistory();
         setMult(1.00);
         statusEl.textContent='ожидание…';
-        betBtn.disabled = true;          // по умолчанию запрещено
-        sendProfile();                    // дубль
+        betBtn.disabled = true;
+        sendProfile();
         break;
 
       case 'round_start': onRoundStart(d); break;
@@ -177,7 +176,7 @@
         placingBet = false;
         state.myBet = Number(d.amount)||0;
         setBalance(d.balance ?? state.balance);
-        betBtn.disabled = true;          // ставка принята — больше нельзя
+        betBtn.disabled = true;
         cashoutBtn.disabled = false;
         cashoutBtn.classList.add('active','pulse','armed');
         updateTopPayout();
@@ -192,9 +191,8 @@
         cashoutLock = false;
         break;
 
-      case 'profile_update':
-        addOrUpdatePlayer(d.userId, d.nick, d.avatar);
-        break;
+      // ⛔ Больше не обрабатываем profile_update, чтобы не создавать “пустых” игроков
+      // case 'profile_update': addOrUpdatePlayer(d.userId, d.nick, d.avatar); break;
 
       case 'error':
         placingBet = false; cashoutLock = false; alert(d.message || 'Ошибка'); break;
@@ -253,10 +251,18 @@
   function clearPlayers(){ players.clear(); renderPlayers(); }
   function renderPlayers(){
     playersList.innerHTML = '';
-    let total=0;
-    for (const [,p] of players) total += p.amount||0;
+    let total = 0;
+
+    for (const [,p] of players) if (p.amount) total += p.amount;
+
     for (const [,p] of players){
-      const ava = p.avatar ? `<img class="pava" src="${esc(p.avatar)}" alt="">` : `<div class="pava pava--ph"></div>`;
+      const shouldShow = (p.amount > 0) || p.cashed;
+      if (!shouldShow) continue;
+
+      const ava = p.avatar
+        ? `<img class="pava" src="${esc(p.avatar)}" alt="">`
+        : `<div class="pava pava--ph"></div>`;
+
       const row = document.createElement('div'); row.className='player';
       row.innerHTML = `
         <div class="pinfo">${ava}<div class="pname">${esc(p.nick||'User')}</div></div>
@@ -265,6 +271,7 @@
         </div>`;
       playersList.appendChild(row);
     }
+
     roundTotal.textContent = total ? `${total.toFixed(2)} TON` : '';
   }
 
@@ -295,7 +302,7 @@
     series = [{x:0,y:1}]; drawChart();
     setMult(1.00);
     statusEl.textContent='ставки…';
-    betBtn.disabled=false;         // только здесь разрешаем ставку
+    betBtn.disabled=false;
     cashoutBtn.disabled=true;
     cashoutBtn.classList.remove('active','pulse','armed');
     payoutTopEl.textContent = '';
@@ -312,7 +319,7 @@
     state.roundState='running';
     statusEl.textContent='в полёте';
     startTicker();
-    betBtn.disabled = true;        // при старте полёта всегда блок
+    betBtn.disabled = true;
     if (state.myBet>0){ cashoutBtn.disabled=false; cashoutBtn.classList.add('active','pulse'); }
     updateTopPayout();
   }
@@ -324,9 +331,21 @@
     statusEl.textContent='КРАШ';
     cashoutBtn.classList.remove('armed');
     payoutTopEl.textContent = '';
-    betBtn.disabled = true;        // до следующего старта
+    betBtn.disabled = true;
     setTimeout(()=>{ setMult(1.00); statusEl.textContent='ожидание…'; clearPlayers(); },900);
   }
+
+  // ==== ticker ====
+  function startTicker(){
+    if (localTicker) return;
+    function tick(){ if (state.roundState!=='running'){ stopTicker(); return; }
+      setMult(state.displayedMult + 0.01);
+      const next = Math.max(18, Math.round(180 - (state.displayedMult - 1) * 35));
+      localTicker = setTimeout(tick, next);
+    }
+    tick();
+  }
+  function stopTicker(){ if (localTicker){ clearTimeout(localTicker); localTicker=null; } }
 
   // ==== modal ====
   function openModal(el){
@@ -339,10 +358,7 @@
     ensureBetInputReady(modalBetInput.value || '');
   }
   function closeModal(el){ if (!el) return; el.classList.remove('open'); el.style.display='none'; document.body.classList.remove('modal-open'); }
-  function openBetModal(){
-    if (state.roundState!=='betting'){ alert('Ставки ещё не открыты.'); return; }
-    ensureBetInputReady(modalBetInput.value||''); openModal(betModal);
-  }
+  function openBetModal(){ if (state.roundState!=='betting'){ alert('Ставки ещё не открыты.'); return; } ensureBetInputReady(modalBetInput.value||''); openModal(betModal); }
   betBtn?.addEventListener('click', openBetModal);
   modalClose?.addEventListener('click', ()=> closeModal(betModal));
   modalBetInput?.addEventListener('keydown', e=>{ if (e.key==='Enter') modalConfirm.click(); });
@@ -358,7 +374,7 @@
       const nick = profileName.textContent || 'User';
       const avatar = profileAva.getAttribute('src') || null;
       ws.send(JSON.stringify({ type:'place_bet', amount: amt, profile:{nick,avatar} }));
-      closeModal(betModal); betBtn.disabled = true;   // сразу блокируем, чтобы не спамили
+      closeModal(betModal); betBtn.disabled = true;
     }catch{}
   });
 
@@ -408,7 +424,7 @@
   modalBetInput?.addEventListener('wheel', e => e.preventDefault(), { passive:false });
   window.addEventListener('error', e=> console.error('JS Error:', e.message));
 
-  // ================== WHEEL (5 NFT, 2 No Loot, 1 Re-roll) ==================
+  // ================== WHEEL ==================
   const wheelCanvas = $('#wheelCanvas'); const wctx = wheelCanvas?.getContext('2d');
   const wheelCenter = $('#wheelCenter'); const wheelSpinBtn = $('#wheelSpinBtn'); const starsEl = $('#starsBalance');
   const WSTATE = { stars: 0, price: 50, sectors: [], angle: 0, spinning: false, rerollOnce:false, pendingPayload:null };
@@ -437,12 +453,9 @@
     wctx.save(); wctx.translate(cx,cy); wctx.rotate(WSTATE.angle);
     for (let i=0;i<N;i++){
       const a0=i*step, a1=(i+1)*step, sec=WSTATE.sectors[i];
-      // сектор
       wctx.beginPath(); wctx.moveTo(0,0); wctx.arc(0,0,R,a0,a1,false); wctx.closePath();
       wctx.fillStyle=sec.color||'#202733'; wctx.fill();
-      // разделитель
       wctx.strokeStyle='#0b1119'; wctx.lineWidth=3; wctx.beginPath(); wctx.arc(0,0,R,a1-0.002,a1+0.002); wctx.stroke();
-      // контент
       const mid=(a0+a1)/2, rIcon=R*0.68, x=Math.cos(mid)*rIcon, y=Math.sin(mid)*rIcon;
       wctx.save(); wctx.translate(x,y); wctx.rotate(mid+Math.PI/2);
       if (sec.type==='gift'){ drawIcon(sec.img, -24, -24, 48, 48, 10); }
@@ -459,8 +472,8 @@
     if (!img){ img=new Image(); img.crossOrigin='anonymous'; img.src=src; imgCache.set(src,img); img.onload=()=>wheelRender(); }
     if (!img.complete){ drawPill('…'); return; }
     wctx.save(); const rr=Math.min(r,w/2,h/2);
-    wctx.beginPath(); wctx.moveTo(x+rr,y);
-    wctx.arcTo(x+w,y, x+w,y+h, rr); wctx.arcTo(x+w,y+h, x,y+h, rr);
+    wctx.beginPath();
+    wctx.moveTo(x+rr,y); wctx.arcTo(x+w,y, x+w,y+h, rr); wctx.arcTo(x+w,y+h, x,y+h, rr);
     wctx.arcTo(x,y+h, x,y, rr); wctx.arcTo(x,y, x+w,y, rr); wctx.closePath(); wctx.clip();
     wctx.drawImage(img,x,y,w,h); wctx.restore();
   }
@@ -487,21 +500,17 @@
       if (!r.ok) { alert(r.error||'Ошибка выставления счёта'); return false; }
       WSTATE.pendingPayload = r.payload;
 
-      // Открываем инвойс корректно для мини-приложения
       const link = r.link;
       if (tg?.openInvoice){
-        const res = await tg.openInvoice(link); // вернёт "paid"/"cancelled"/"failed" (в актуальных клиентах)
+        const res = await tg.openInvoice(link);
         if (res === 'paid'){
           await creditStars(); return true;
         }
-        // если клиент старый — упадём сюда и попробуем дополлить вручную
       } else {
-        // запасной вариант (в Вебе/ПК)
         window.open(link,'_blank');
         alert('После оплаты вернитесь в игру — проверим платёж и крутнём автоматически.');
       }
 
-      // Поллим подтверждение
       const ok = await creditStarsWithPolling(18, 1500);
       return ok;
     }catch(e){
@@ -570,9 +579,8 @@
     if (WSTATE.spinning) return;
     if (WSTATE.stars < WSTATE.price){
       const ok = await ensureStars(WSTATE.price);
-      if (!ok) return; // ждём оплату
+      if (!ok) return;
     }
-    // списать и крутить
     WSTATE.stars -= WSTATE.price; starsEl.textContent = WSTATE.stars;
     WSTATE.rerollOnce=false;
     wheelSpin(true);
@@ -581,4 +589,40 @@
   // загрузить подарки
   wheelLoad();
 
+  // ==== chart/ticker helpers ====
+  function pushPoint(mult){ if (!ctx) return; const x = (series.length ? series[series.length-1].x + 1 : 0); series.push({ x, y: mult }); if (series.length > 500) series.shift(); drawChart(); }
+  function drawChart(){
+    if (!ctx) return;
+    const w = chartCanvas.width, h = chartCanvas.height;
+    ctx.clearRect(0,0,w,h); ctx.fillStyle='#0d131b'; ctx.fillRect(0,0,w,h);
+    ctx.strokeStyle='#182232'; ctx.lineWidth=1;
+    for (let i=1;i<=4;i++){ const y=(h/5)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+    if (series.length<2) return;
+    const xs = series.map(p=>p.x), ys = series.map(p=>p.y);
+    const xmin=Math.min(...xs), xmax=Math.max(...xs), ymin=1, ymax=Math.max(2, Math.max(...ys)*1.1);
+    const fx = x=> (x - xmin) / Math.max(1,(xmax - xmin)) * (w-24) + 12;
+    const fy = y=> h - ( (y - ymin) / (ymax - ymin) ) * (h-24) - 12;
+    ctx.strokeStyle='#22e58a'; ctx.lineWidth=3; ctx.beginPath();
+    series.forEach((p,i)=>{ const X=fx(p.x), Y=fy(p.y); if (i===0) ctx.moveTo(X,Y); else ctx.lineTo(X,Y); });
+    ctx.stroke();
+  }
+  function startTicker(){
+    if (localTicker) return;
+    function tick(){ if (state.roundState!=='running'){ stopTicker(); return; }
+      setMult(state.displayedMult + 0.01);
+      const next = Math.max(18, Math.round(180 - (state.displayedMult - 1) * 35));
+      localTicker = setTimeout(tick, next);
+    }
+    tick();
+  }
+  function stopTicker(){ if (localTicker){ clearTimeout(localTicker); localTicker=null; } }
+
+  window.addEventListener('resize', ()=>{
+    if (!chartCanvas) return;
+    const rect = chartCanvas.parentElement.getBoundingClientRect();
+    chartCanvas.width  = Math.max(300, rect.width);
+    chartCanvas.height = Math.max(180, rect.height);
+    drawChart();
+  });
+  window.dispatchEvent(new Event('resize'));
 })();
