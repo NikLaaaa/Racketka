@@ -1,243 +1,516 @@
-:root{
-  --bg: #0b1119;
-  --panel: #0f1622;
-  --text: #dbe7ff;
-  --muted: #7d8aa5;
-  --primary: #2d7dff;
-  --ok: #22e58a;
-  --bad: #ff5c5c;
-  --chip: #1b2533;
-  --shadow: 0 6px 24px rgba(0,0,0,.35);
-}
+(() => {
+  // ==== helpers ====
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) =>
+    String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-/* safe-area и корректная высота на iOS */
-:root { --safe-bottom: env(safe-area-inset-bottom, 0px); }
-@supports (padding-bottom: constant(safe-area-inset-bottom)) {
-  :root { --safe-bottom: constant(safe-area-inset-bottom); }
-}
-html,body{ height:100%; }
-body{
-  margin:0; padding:0;
-  background:var(--bg);
-  color:var(--text);
-  font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  min-height:100dvh;
-  padding-bottom:max(8px, var(--safe-bottom));
-}
+  // ==== DOM ====
+  const onlineVal = $('#onlineVal');
+  const balanceNumEl = $('#balanceNum');
+  const multEl = $('#multVal');
+  const statusEl = $('#status');
+  const profitEl = $('#profitHint');
 
-*{ box-sizing:border-box; }
-img{ display:block; }
+  const playersList = $('#playersList');
+  const roundTotal = $('#roundTotal');
 
-.wrap{ max-width:900px; margin:0 auto; padding:12px; }
+  const betBtn = $('#betBtn');
+  const cashoutBtn = $('#cashoutBtn');
 
-/* top */
-.topbar{ display:flex; align-items:center; gap:10px; }
-.pill{
-  background:var(--panel);
-  border-radius:999px;
-  padding:6px 12px;
-  display:flex; align-items:center; gap:8px;
-  box-shadow:var(--shadow);
-}
-.pill.balance img{ width:18px; height:18px; }
-.pill .dot{
-  width:8px; height:8px;
-  background:#19d160;
-  border-radius:50%;
-}
-.spacer{ flex:1 1 auto; }
-.icon-btn{
-  background:#1b2738;
-  border:none; color:#fff;
-  width:26px; height:26px;
-  border-radius:6px;
-  font-size:16px;
-  cursor:pointer;
-}
+  const navCrash = $('#navCrash');
+  const navProfile = $('#navProfile');
+  const tabCrash = $('#tabCrash');
+  const tabProfile = $('#tabProfile');
 
-/* crash results */
-.crash-row{
-  display:flex; gap:8px;
-  margin:10px 0 6px;
-}
-.crash-chip{
-  background:var(--chip);
-  padding:4px 10px;
-  border-radius:10px;
-  font-weight:700;
-}
-.crash-chip.good{ background:#133a2a; color:#6cffb0; }
-.crash-chip.bad{ background:#3a1a1a; color:#ff9d9d; }
+  const profileAva = $('#profileAva');
+  const profileName = $('#profileName');
+  const profileBalance = $('#profileBalance');
 
-/* stage layout */
-.stage{ position:relative; padding:8px 0 4px; }
-.centerHUD{ text-align:center; margin:6px 0 4px; }
-.mult{ font-size:32px; font-weight:800; }
-.status{ color:var(--muted); margin-top:2px; font-size:14px; }
+  const depositBtn = $('#depositBtn');
+  const withdrawBtn = $('#withdrawBtn');
+  const disconnectBtn = $('#disconnectBtn');
+  const walletInfo = $('#walletInfo');
 
-/* коэффициент + подсказка профита */
-.mult-wrap{ display:flex; align-items:baseline; gap:.5rem; justify-content:center; }
-.profit{ font-size:16px; font-weight:600; color:var(--ok); }
+  const betModal = $('#betModal');
+  const modalBox = $('#betBox') || betModal?.firstElementChild;
+  const modalBetInput = $('#modalBetInput');
+  const modalConfirm = $('#modalConfirmBtn');
+  const modalClose = $('#modalClose');
 
-/* chart */
-.chart-wrap{
-  position:relative;
-  width:100%;
-  height:220px;
-  background:#0d131b;
-  border:1px solid #1c2736;
-  border-radius:16px;
-  overflow:hidden;
-  box-shadow:var(--shadow);
-}
-#chartCanvas{ width:100%; height:100%; display:block; }
+  const chartCanvas = $('#chartCanvas');
+  const ctx = chartCanvas?.getContext?.('2d');
 
-/* buttons */
-.cta{ margin:12px 0; }
-.btn{
-  width:100%;
-  padding:14px 16px;
-  font-size:18px;
-  border-radius:14px;
-  border:none;
-  cursor:pointer;
-  background:#1b2738; color:#fff;
-}
-.btn.primary{ background:var(--primary); }
-.btn.cash{ background:#233047; }
-.btn.ghost{ background:#1a2333; }
+  // ==== state ====
+  const qs = new URLSearchParams(location.search);
+  const state = {
+    userId: qs.get('userId') || ('guest' + (Math.random()*1e6|0)),
+    balance: 0,
+    roundState: 'idle',
+    displayedMult: 1,
+    myBet: 0,
+    myCashed: false
+  };
 
-/* зелёный «Забрать», когда есть активная ставка */
-#cashoutBtn.armed{
-  background: var(--ok);
-  color:#0b1a12;
-  border-color: transparent;
-}
+  const players = new Map();
+  let placingBet = false;
+  let cashoutLock = false;
+  let localTicker = null;
+  let history3 = [];
+  let series = [];
 
-/* players list */
-.players{
-  margin-top:12px;
-  background:var(--panel);
-  border-radius:14px;
-  padding:10px;
-  box-shadow:var(--shadow);
-}
-.players-head{
-  display:flex; justify-content:space-between;
-  color:var(--muted); margin-bottom:6px;
-}
-.players-list{
-  display:flex; flex-direction:column;
-  gap:6px;
-  max-height:200px;
-  overflow:auto;
-}
-.player{
-  display:flex; justify-content:space-between;
-  padding:8px 10px;
-  background:#0f1520;
-  border-radius:10px;
-}
-.pinfo{ display:flex; align-items:center; gap:10px; }
-.pava{ width:28px; height:28px; border-radius:50%; object-fit:cover; background:#222; }
-.pava--ph{ background:#2a3344; }
-.pname{ font-weight:600; }
-.pval.good{ color:var(--ok); }
+  // ==== TonConnect (optional) ====
+  let tonConnectUI;
+  const DEPOSIT_WALLET = 'UQDEx5xByv2a4JE95W2EmJKfDe1ZWA0Azs16GTiUlhlESfed';
 
-.hidden{ display:none !important; }
-
-/* profile */
-.profile-card{
-  display:flex; align-items:center;
-  gap:12px;
-  background:var(--panel);
-  padding:12px;
-  border-radius:14px;
-  margin-bottom:12px;
-}
-.profile-ava{
-  width:64px;
-  height:64px;
-  border-radius:50%;
-  object-fit:cover;
-  background:#233047;
-  flex-shrink:0;
-}
-.profile-name{ font-weight:700; }
-.profile-balance{
-  margin-left:auto;
-  display:flex;
-  align-items:center;
-  gap:6px;
-}
-.profile-balance img{ width:18px; height:18px; flex-shrink:0; }
-
-.profile-actions{ display:flex; flex-direction:column; gap:8px; margin-top:12px; }
-.wallet-info{ margin-top:8px; color:var(--muted); word-break:break-all; }
-
-/* footer */
-.footer{
-  position:sticky; bottom:0;
-  background:linear-gradient(180deg,transparent, rgba(0,0,0,.45));
-  padding-top:8px;
-  padding-bottom: max(8px, var(--safe-bottom));
-}
-.tabbar{
-  display:flex;
-  gap:10px;
-  margin-top:8px;
-}
-.tbtn{
-  flex:1 1 0;
-  padding:10px;
-  border:none;
-  border-radius:12px;
-  color:#fff;
-  background:#131a25;
-  cursor:pointer;
-}
-.tbtn.active{ background:#1e2a3d; }
-
-/* modal */
-.modal{
-  position:fixed; inset:0;
-  display:none;
-  align-items:center; justify-content:center;
-  background:rgba(0,0,0,.55);
-  z-index:1000;
-}
-.modal.open{ display:flex; }
-.modal-box{
-  width:min(480px,92vw);
-  background:#0f1622;
-  border:1px solid #1c2736;
-  border-radius:16px;
-  padding:16px;
-  box-shadow:var(--shadow);
-}
-.modal-box h3{ margin:0 0 10px; }
-.modal-box input{
-  width:100%;
-  font-size:18px;
-  padding:12px;
-  border-radius:12px;
-  border:1px solid #273246;
-  background:#0b121d;
-  color:#fff;
-}
-.modal-actions{
-  display:flex; gap:8px;
-  margin-top:10px;
-}
-
-/* desktop */
-@media (min-width:840px){
-  .stage{
-    display:grid;
-    grid-template-columns: 1fr 260px;
-    gap:12px;
-    align-items:start;
+  function getConnectedAddress(){
+    return tonConnectUI?.wallet?.account?.address || null;
   }
-  .cta{ grid-column:1; }
-  .players{ grid-column:2; margin-top:0; }
-}
+  function updateWalletInfo(){
+    const addr = getConnectedAddress();
+    if (addr) {
+      walletInfo?.classList?.remove('hidden');
+      walletInfo.textContent = `Кошелёк: ${addr}`;
+    } else {
+      walletInfo?.classList?.add('hidden');
+      walletInfo.textContent = '';
+    }
+  }
+  async function initTonConnect(){
+    if (!window.TON_CONNECT_UI) return;
+    tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
+      manifestUrl: `${location.origin}/tonconnect-manifest.json`,
+      buttonRootId: 'ton-connect'
+    });
+    tonConnectUI.onStatusChange(updateWalletInfo);
+    updateWalletInfo();
+  }
+  initTonConnect();
+
+  disconnectBtn?.addEventListener('click', async () => {
+    try { await tonConnectUI?.disconnect(); } catch(_) {}
+    updateWalletInfo();
+  });
+
+  depositBtn?.addEventListener('click', async () => {
+    try {
+      if (!getConnectedAddress()) {
+        await tonConnectUI?.openModal();
+        if (!getConnectedAddress()) return;
+      }
+      const amtStr = prompt('Сколько TON пополнить?');
+      const amt = Number((amtStr||'').replace(',','.'));
+      if (!amt || amt <= 0) return;
+      const nano = BigInt(Math.round(amt * 1e9)).toString();
+      await tonConnectUI.sendTransaction({
+        validUntil: Math.floor(Date.now()/1000) + 300,
+        messages: [{ address: DEPOSIT_WALLET, amount: nano }]
+      });
+      alert('✅ Транзакция отправлена. Зачисление будет после подтверждения сети.');
+    } catch(e){
+      alert('Операция отменена или произошла ошибка.');
+    }
+  });
+
+  withdrawBtn?.addEventListener('click', async () => {
+    const amtStr = prompt('Сумма вывода (TON):');
+    const amt = Number((amtStr||'').replace(',','.'));
+    if (!amt || amt<=0) return;
+    try{
+      const body = { userId: state.userId, amount: amt };
+      const addr = getConnectedAddress();
+      if (addr) body.address = addr;
+      const r = await fetch('/withdraw', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      }).then(r=>r.json());
+      if (!r.ok) return alert(r.error || 'Ошибка');
+      alert('✅ Заявка создана. Сумма будет перечислена на ваш кошелёк в ближайшее время.');
+    }catch(_){ alert('Ошибка сети'); }
+  });
+
+  // ==== Telegram профиль (имя + аватар) ====
+  function applyTgProfile(){
+    try{
+      const tg = window.Telegram?.WebApp;
+      tg?.ready?.();
+      tg?.expand?.();
+
+      const u = tg?.initDataUnsafe?.user;
+      const nameQS = qs.get('name');
+      const photoQS = qs.get('photo');
+
+      let displayName = 'User';
+      let photo = null;
+
+      if (u) {
+        const composed = [u.first_name, u.last_name].filter(Boolean).join(' ');
+        displayName = composed || (u.username ? `@${u.username}` : 'User');
+        if (u.photo_url) photo = u.photo_url;
+      } else if (nameQS) {
+        displayName = nameQS;
+        if (photoQS) photo = photoQS;
+      }
+
+      if (photo) profileAva.src = photo; else profileAva.removeAttribute('src');
+      profileName.textContent = displayName;
+
+      const sendProfile = () => {
+        try { ws.send(JSON.stringify({ type:'profile', profile:{ nick: displayName, avatar: photo } })); } catch(_){}
+      };
+      if (ws.readyState === 1) sendProfile(); else ws.addEventListener('open', sendProfile, { once:true });
+    } catch(_) {}
+  }
+  document.addEventListener('DOMContentLoaded', applyTgProfile);
+
+  // ==== WebSocket ====
+  const wsUrl = location.origin.replace(/^http/, 'ws') + `/?userId=${encodeURIComponent(state.userId)}`;
+  const ws = new WebSocket(wsUrl);
+
+  ws.onmessage = (ev) => {
+    let d; try{ d = JSON.parse(ev.data); } catch { return; }
+    if (d.online != null) onlineVal.textContent = d.online;
+
+    switch (d.type) {
+      case 'init':
+        setBalance(d.balance || 0);
+        history3 = Array.isArray(d.history) ? d.history.slice(0,3) : [];
+        renderHistory();
+        if (Array.isArray(d.players)) d.players.forEach(p => addOrUpdatePlayer(p.userId, p.nick, p.avatar));
+        setMult(1.00);
+        statusEl.textContent='ожидание…';
+        break;
+
+      case 'round_start': onRoundStart(d); break;
+      case 'round_running': onRoundRunning(); break;
+      case 'multiplier': setMult(d.multiplier); break;
+
+      case 'round_end':
+        onRoundEnd(d);
+        if (Array.isArray(d.history)) { history3 = d.history.slice(0,3); renderHistory(); }
+        break;
+
+      case 'player_bet': onPlayerBet(d); break;
+      case 'player_cashed': onPlayerCashed(d); break;
+
+      case 'bet_confirm':
+        placingBet = false;
+        state.myBet = Number(d.amount)||0;
+        setBalance(d.balance ?? state.balance);
+        betBtn.disabled = true;
+        cashoutBtn.disabled = false;
+        cashoutBtn.classList.add('active','pulse','armed');
+        updateProfitHint();
+        break;
+
+      case 'cashout_result':
+        setBalance(d.balance ?? state.balance);
+        state.myBet = 0; state.myCashed = true;
+        cashoutBtn.disabled = true;
+        cashoutBtn.classList.remove('active','pulse','armed');
+        profitEl.textContent = '';
+        cashoutLock = false;
+        break;
+
+      case 'error':
+        placingBet = false;
+        cashoutLock = false;
+        alert(d.message || 'Ошибка');
+        break;
+    }
+  };
+
+  // ==== UI helpers ====
+  function setBalance(v){
+    state.balance = Number(v)||0;
+    balanceNumEl.textContent = state.balance.toFixed(2);
+    profileBalance.textContent = state.balance.toFixed(2);
+  }
+
+  function setMult(v){
+    const m = Number(v)||1;
+    state.displayedMult = m;
+    multEl.textContent = m.toFixed(2);
+    pushPoint(m);
+    updateProfitHint();
+  }
+
+  function updateProfitHint(){
+    const HOUSE = 0.98; // комиссия дома (как на сервере)
+    const bet = state.myBet || 0;
+    const k = state.displayedMult || 1;
+    const profit = Math.max(0, bet * k * HOUSE - bet);
+    if (bet > 0 && state.roundState === 'running' && profit > 0) {
+      profitEl.textContent = `+${profit.toFixed(2)}`;
+    } else {
+      profitEl.textContent = '';
+    }
+    const armed = bet > 0 && state.roundState === 'running';
+    cashoutBtn.classList.toggle('armed', armed);
+  }
+
+  function renderHistory(){
+    const row = $('#crashRow'); row.innerHTML = '';
+    history3.slice(0,3).forEach(x=>{
+      const m = Number(x)||1;
+      const el = document.createElement('div');
+      el.className = 'crash-chip ' + (m>=2 ? 'good' : 'bad');
+      el.textContent = m.toFixed(2) + 'x';
+      row.appendChild(el);
+    });
+  }
+
+  function addOrUpdatePlayer(id, nick, avatar){
+    const p = players.get(id) || { id, amount:0, payout:0, cashed:false };
+    p.nick = nick || p.nick || ('User '+String(id).slice(-4));
+    p.avatar = (avatar !== undefined) ? avatar : (p.avatar || null);
+    players.set(id, p);
+    renderPlayers();
+  }
+  function onPlayerBet(d){
+    addOrUpdatePlayer(d.userId, d.nick, d.avatar);
+    const p = players.get(d.userId);
+    p.amount = +(p.amount + Number(d.amount||0)).toFixed(2);
+    renderPlayers();
+  }
+  function onPlayerCashed(d){
+    const p = players.get(d.userId); if (!p) return;
+    p.cashed = true; p.payout = Number(d.payout)||0;
+    renderPlayers();
+  }
+  function clearPlayers(){ players.clear(); renderPlayers(); }
+
+  function renderPlayers(){
+    playersList.innerHTML = '';
+    let total=0;
+    for (const [,p] of players) total += p.amount||0;
+
+    for (const [,p] of players){
+      const row = document.createElement('div'); row.className='player';
+      row.innerHTML = `
+        <div class="pinfo">
+          ${p.avatar ? `<img class="pava" src="${esc(p.avatar)}" alt="">` : `<div class="pava pava--ph"></div>`}
+          <div class="pname">${esc(p.nick||'User')}</div>
+        </div>
+        <div class="pval ${p.cashed ? 'good' : ''}">
+          ${p.cashed ? `+${(p.payout||0).toFixed(2)}` : (p.amount ? (p.amount||0).toFixed(2) : '')}
+        </div>`;
+      playersList.appendChild(row);
+    }
+    roundTotal.textContent = total ? `${total.toFixed(2)} TON` : '';
+  }
+
+  // ==== round lifecycle ====
+  function onRoundStart(d){
+    state.roundState='betting';
+    state.myBet=0; state.myCashed=false;
+
+    placingBet = false;
+    cashoutLock = false;
+    closeModal(betModal);
+    modalBetInput.value = '';
+    modalBetInput.disabled = false;
+
+    modalBetInput.setAttribute('type','text');
+    modalBetInput.setAttribute('inputmode','decimal');
+    modalBetInput.setAttribute('autocomplete','off');
+    modalBetInput.setAttribute('autocapitalize','off');
+    modalBetInput.setAttribute('spellcheck','false');
+
+    series = [{x:0,y:1}];
+    drawChart();
+
+    setMult(1.00);
+    statusEl.textContent='ставки…';
+    betBtn.disabled=false;
+    cashoutBtn.disabled=true;
+    cashoutBtn.classList.remove('active','pulse','armed');
+    profitEl.textContent = '';
+    clearPlayers();
+
+    let sec = Math.max(0, Math.round((d.bettingEndsAt - Date.now())/1000));
+    statusEl.textContent = `ставки: ${sec}s`;
+    const iv = setInterval(()=>{
+      if (state.roundState!=='betting'){ clearInterval(iv); return; }
+      sec--;
+      statusEl.textContent = sec<=0 ? 'готовность' : `ставки: ${sec}s`;
+      if (sec<=0) clearInterval(iv);
+    },1000);
+  }
+
+  function onRoundRunning(){
+    state.roundState='running';
+    statusEl.textContent='в полёте';
+    startTicker();
+    if (state.myBet>0){
+      cashoutBtn.disabled=false;
+      cashoutBtn.classList.add('active','pulse');
+    }
+    updateProfitHint();
+  }
+
+  function onRoundEnd(d){
+    state.roundState='finished';
+    stopTicker();
+    const final = Number(d.result||1);
+    setMult(final);
+    statusEl.textContent='КРАШ';
+    cashoutBtn.classList.remove('armed');
+    profitEl.textContent = '';
+    setTimeout(()=>{
+      setMult(1.00);
+      statusEl.textContent='ожидание…';
+      clearPlayers();
+    },900);
+  }
+
+  // ==== ticker ====
+  function startTicker(){
+    if (localTicker) return;
+    function tick(){
+      if (state.roundState!=='running'){ stopTicker(); return; }
+      setMult(state.displayedMult + 0.01);
+      const next = Math.max(18, Math.round(180 - (state.displayedMult - 1) * 35));
+      localTicker = setTimeout(tick, next);
+    }
+    tick();
+  }
+  function stopTicker(){
+    if (localTicker){ clearTimeout(localTicker); localTicker=null; }
+  }
+
+  // ==== modal ====
+  function openModal(el){
+    if (!el) return;
+    if (!el.classList.contains('open')){
+      el.classList.add('open');
+      el.style.display='flex';
+      document.body.classList.add('modal-open');
+    }
+    modalBox?.addEventListener('click', (e)=> e.stopPropagation());
+    el.addEventListener('click', (e)=>{ if (e.target===el) closeModal(el); });
+
+    modalBetInput.disabled = false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        modalBetInput.focus();
+        modalBetInput.select();
+        setTimeout(() => {
+          if (document.activeElement !== modalBetInput) {
+            modalBetInput.focus();
+            modalBetInput.select();
+          }
+        }, 60);
+      });
+    });
+  }
+  function closeModal(el){
+    if (!el) return;
+    el.classList.remove('open');
+    el.style.display='none';
+    document.body.classList.remove('modal-open');
+  }
+
+  function openBetModal(){
+    if (state.roundState!=='betting'){
+      alert('Ставки пока закрыты. Подожди начала раунда.');
+      return;
+    }
+    openModal(betModal);
+  }
+
+  betBtn?.addEventListener('click', openBetModal);
+  modalClose?.addEventListener('click', ()=> closeModal(betModal));
+  modalBetInput?.addEventListener('keydown', (e)=>{ if (e.key==='Enter') modalConfirm.click(); });
+
+  modalConfirm?.addEventListener('click', ()=>{
+    if (placingBet) return;
+    const amt = Number((modalBetInput.value||'').replace(',','.'));
+    if (!amt || amt<=0) { alert('Введите сумму'); return; }
+    if (state.balance < amt) { alert('Недостаточно TON'); return; }
+
+    placingBet = true;
+    try {
+      ws.send(JSON.stringify({ type:'place_bet', amount: amt }));
+      closeModal(betModal);
+      betBtn.disabled = true;
+      setTimeout(()=> placingBet=false, 500); // анти-дубль
+    } catch(_) {
+      placingBet = false;
+    }
+  });
+
+  cashoutBtn?.addEventListener('click', ()=>{
+    if (cashoutLock) return;
+    if (state.roundState!=='running') return alert('Рано');
+    cashoutLock = true;
+    ws.send(JSON.stringify({ type:'cashout' }));
+    cashoutBtn.disabled = true;
+    cashoutBtn.classList.remove('active','pulse');
+  });
+
+  // ==== tabs ====
+  function setTab(name){
+    const crash = name==='crash';
+    tabCrash.classList.toggle('hidden', !crash);
+    tabProfile.classList.toggle('hidden', crash);
+    navCrash.classList.toggle('active', crash);
+    navProfile.classList.toggle('active', !crash);
+  }
+  navCrash?.addEventListener('click', ()=> setTab('crash'));
+  navProfile?.addEventListener('click', ()=> setTab('profile'));
+
+  // ==== chart ====
+  function resizeCanvas(){
+    if (!chartCanvas) return;
+    const rect = chartCanvas.parentElement.getBoundingClientRect();
+    chartCanvas.width = Math.max(300, rect.width);
+    chartCanvas.height = Math.max(180, rect.height);
+    drawChart();
+  }
+  function pushPoint(mult){
+    if (!ctx) return;
+    const x = (series.length ? series[series.length-1].x + 1 : 0);
+    series.push({ x, y: mult });
+    if (series.length > 500) series.shift();
+    drawChart();
+  }
+  function drawChart(){
+    if (!ctx) return;
+    const w = chartCanvas.width, h = chartCanvas.height;
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle = '#0d131b';
+    ctx.fillRect(0,0,w,h);
+
+    ctx.strokeStyle = '#182232';
+    ctx.lineWidth = 1;
+    for (let i=1;i<=4;i++){
+      const y = (h/5)*i;
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+    }
+
+    if (series.length < 2) return;
+
+    const xs = series.map(p=>p.x);
+    const ys = series.map(p=>p.y);
+    const xmin = Math.min(...xs), xmax = Math.max(...xs);
+    const ymin = 1, ymax = Math.max(2, Math.max(...ys) * 1.1);
+
+    const fx = (x)=> (x - xmin) / Math.max(1,(xmax - xmin)) * (w-24) + 12;
+    const fy = (y)=> h - ( (y - ymin) / (ymax - ymin) ) * (h-24) - 12;
+
+    ctx.strokeStyle = '#22e58a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    series.forEach((p,i)=>{
+      const X = fx(p.x), Y = fy(p.y);
+      if (i===0) ctx.moveTo(X,Y); else ctx.lineTo(X,Y);
+    });
+    ctx.stroke();
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  // safety
+  modalBetInput?.addEventListener('wheel', e => e.preventDefault(), { passive:false });
+  window.addEventListener('error', (e)=> console.error('JS Error:', e.message));
+})();
