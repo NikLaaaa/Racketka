@@ -74,15 +74,19 @@
             .filter(x => x.img && x.priceTon > 0)
             .sort((a,b)=>a.priceTon-b.priceTon)
         : [];
-      // после загрузки сразу перерисуем
+    }catch(e){
+      GIFTS = [];
+    } finally {
+      // после любой попытки — перерисуем
       renderPlayers();
       updateTopPayout();
-    }catch(e){ /* тихо */ }
+    }
   }
   loadGifts();
   setInterval(loadGifts, 300_000);
 
-  function pickGift(amountTon){
+  // жёсткий подбор (<= сумма)
+  function pickGiftLE(amountTon){
     if (!GIFTS.length || !amountTon) return null;
     const a = Number(amountTon) || 0;
     let best = null;
@@ -91,6 +95,18 @@
       if (a + 1e-9 >= p) best = g; else break;
     }
     return best;
+  }
+  // мягкий подбор: если не нашли ≤, берём ближайший сверху и считаем «сколько не хватает»
+  function pickGiftRelax(amountTon){
+    if (!GIFTS.length || !amountTon) return { gift:null, affordable:false, missing:0 };
+    const a = Number(amountTon) || 0;
+    const le = pickGiftLE(a);
+    if (le) return { gift: le, affordable:true, missing:0 };
+    // самый дешёвый сверху
+    const higher = GIFTS.find(g => (Number(g.priceTon)||0) > a) || null;
+    if (!higher) return { gift:null, affordable:false, missing:0 };
+    const missing = Math.max(0, (Number(higher.priceTon)||0) - a);
+    return { gift: higher, affordable:false, missing };
   }
 
   // ==== TonConnect (optional) ====
@@ -320,11 +336,18 @@
       } else if (p.amount) {
         amountTon = Number(p.amount)||0;
       }
-      const gift = pickGift(amountTon);
 
-      const giftHTML = gift
-        ? `<div class="pgift"><img src="${gift.img}" alt="${esc(gift.name)}"><span>${esc(gift.name)} • ${amountTon.toFixed(2)} TON</span></div>`
-        : (amountTon>0 ? `<div class="pgift">≈ ${amountTon.toFixed(2)} TON</div>` : '');
+      // мягкий подбор подарка
+      const { gift, affordable, missing } = pickGiftRelax(amountTon);
+
+      let giftHTML = '';
+      if (gift) {
+        giftHTML = affordable
+          ? `<div class="pgift"><img src="${gift.img}" alt="${esc(gift.name)}"><span>${esc(gift.name)} • ${amountTon.toFixed(2)} TON</span></div>`
+          : `<div class="pgift"><img src="${gift.img}" alt="${esc(gift.name)}"><span>${esc(gift.name)} • не хватает ${missing.toFixed(2)} TON • ≈ ${amountTon.toFixed(2)} TON</span></div>`;
+      } else if (amountTon > 0) {
+        giftHTML = `<div class="pgift">≈ ${amountTon.toFixed(2)} TON</div>`;
+      }
 
       const ava = p.avatar ? `<img class="pava" src="${esc(p.avatar)}" alt="">` : `<div class="pava pava--ph"></div>`;
 
