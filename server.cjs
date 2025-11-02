@@ -12,7 +12,7 @@ const PORT = Number(process.env.PORT || 3000);
 const SECRET_KEY = process.env.SECRET_KEY || 'supersecret';
 const DEPOSIT_WALLET = process.env.DEPOSIT_WALLET || '';
 const TONAPI_KEY = process.env.TONAPI_KEY || '';
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''; // нужен для Stars
 const TG = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : null;
 
 if (!DEPOSIT_WALLET) {
@@ -265,7 +265,7 @@ app.get('/gifts', async (_req, res) => {
 // ===== STARS (Telegram Stars)
 app.post('/stars/create', async (req, res) => {
   try{
-    if (!TG) return res.status(500).json({ ok:false, error:'BOT_TOKEN not set' });
+    if (!TG) return res.status(500).json({ ok:false, error:'TELEGRAM_BOT_TOKEN not set' });
     const { userId, amount } = req.body||{};
     const stars = Number(amount||0);
     if (!userId || !stars) return res.json({ ok:false, error:'bad params' });
@@ -273,7 +273,7 @@ app.post('/stars/create', async (req, res) => {
     const payload = `wheel:${userId}:${Date.now()}:${stars}`;
     const body = {
       title: 'Wheel spin',
-      description: 'Покупка 50 ⭐ для спина',
+      description: `Покупка ${stars} ⭐ для спина`,
       payload,
       currency: 'XTR',
       prices: [{ label:'⭐', amount: stars }]
@@ -289,12 +289,13 @@ app.post('/stars/create', async (req, res) => {
 
 app.post('/stars/credit', async (req, res) => {
   try{
-    if (!TG) return res.status(500).json({ ok:false, error:'BOT_TOKEN not set' });
+    if (!TG) return res.status(500).json({ ok:false, error:'TELEGRAM_BOT_TOKEN not set' });
     const { userId, payload } = req.body||{};
     if (!userId || !payload) return res.json({ ok:false, error:'bad params' });
     const db = await dbPromise;
     if (db._creditedStars[payload]) return res.json({ ok:true, already:true, stars: db.stars[userId]||0 });
 
+    // получаем список звёздных транзакций и ищем нашу по payload
     const tx = await fetch(`${TG}/getStarTransactions`, { method:'POST' }).then(r=>r.json()).catch(()=>null);
     const list = (tx && tx.ok && Array.isArray(tx.result)) ? tx.result : [];
     const okTx = list.find(t => String(t.invoice_payload||t.payload||'')===payload);
@@ -462,7 +463,7 @@ async function pollTonCenter(){
             db._creditedTxs[txId] = true;
             console.log(`+${ton} TON => ${uid} (from ${sender})`);
           }else{
-            db._creditedTxs[txId] = true;
+            db._creditedTxs[txId] = true; // отметили, чтобы не пересчитывать
           }
         }
       }
@@ -485,4 +486,10 @@ async function pollTonCenter(){
     startRound();
   });
 })();
-try { require('./bot.cjs'); } catch { /* опционально */ }
+
+// Запускаем polling-бота только если явно включён флагом,
+// чтобы избежать 409 при дублирующемся запуске.
+const ENABLE_BOT_POLLING = String(process.env.ENABLE_BOT_POLLING || '').toLowerCase() === 'true';
+if (ENABLE_BOT_POLLING) {
+  try { require('./bot.js'); } catch (e) { console.error('bot.js load error', e); }
+}
