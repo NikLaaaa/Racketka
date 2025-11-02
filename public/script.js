@@ -41,8 +41,8 @@
   const ctx = chartCanvas?.getContext?.('2d');
 
   // ==== constants ====
-  const MIN_BET = 0.10;      // минимальная ставка
-  const HOUSE = 0.98;        // комиссия (для подсказки профита)
+  const MIN_BET = 0.10;   // минимальная ставка
+  const HOUSE = 0.98;     // комиссия (подсказка прибыли)
 
   // ==== state ====
   const qs = new URLSearchParams(location.search);
@@ -302,10 +302,9 @@
     roundTotal.textContent = total ? `${total.toFixed(2)} TON` : '';
   }
 
-  // ==== ensure bet input ready ====
+  // ==== гарантированно «живой» инпут ====
   function ensureBetInputReady(initialValue = ''){
     if (!modalBetInput) return;
-    // насильно делаем текстовый инпут и разблокируем
     modalBetInput.setAttribute('type','text');
     modalBetInput.setAttribute('inputmode','decimal');
     modalBetInput.setAttribute('autocomplete','off');
@@ -315,7 +314,6 @@
     modalBetInput.disabled = false;
     modalBetInput.value = initialValue;
 
-    // фокус с «повторной попыткой» для десктопных браузеров
     requestAnimationFrame(() => {
       modalBetInput.focus();
       modalBetInput.select();
@@ -408,7 +406,6 @@
       el.style.display='flex';
       document.body.classList.add('modal-open');
     }
-    // защита от «пролёта» кликов
     modalBox?.addEventListener('click', (e)=> e.stopPropagation());
     el.addEventListener('click', (e)=>{ if (e.target===el) closeModal(el); });
 
@@ -426,7 +423,6 @@
       alert('Ставки пока закрыты. Подожди начала раунда.');
       return;
     }
-    // перед открытием всегда нормализуем поле
     ensureBetInputReady(modalBetInput.value || '');
     openModal(betModal);
   }
@@ -437,18 +433,27 @@
 
   modalConfirm?.addEventListener('click', ()=>{
     if (placingBet) return;
-    // парсим и валидируем
+
     const raw = (modalBetInput.value||'').replace(',','.');
-    const amt = Math.round((Number(raw) + Number.EPSILON) * 100) / 100; // до сотых
-    if (!amt || amt < MIN_BET) { alert(`Минимальная ставка ${MIN_BET.toFixed(2)} TON`); ensureBetInputReady(raw); return; }
-    if (state.balance < amt) { alert('Недостаточно TON'); ensureBetInputReady(raw); return; }
+    const amt = Math.round((Number(raw) + Number.EPSILON) * 100) / 100;
+
+    if (!amt || isNaN(amt) || amt < MIN_BET) {
+      alert(`Минимальная ставка ${MIN_BET.toFixed(2)} TON`);
+      ensureBetInputReady(raw);
+      return;
+    }
+    if (state.balance < amt) {
+      alert('Недостаточно TON');
+      ensureBetInputReady(raw);
+      return;
+    }
 
     placingBet = true;
     try {
       ws.send(JSON.stringify({ type:'place_bet', amount: amt }));
       closeModal(betModal);
       betBtn.disabled = true;
-      setTimeout(()=> placingBet=false, 400); // анти-дубль
+      setTimeout(()=> placingBet=false, 400);
     } catch(_) {
       placingBet = false;
     }
@@ -525,7 +530,7 @@
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
 
-  // safety: блокируем «прокрутку» на поле
+  // safety
   modalBetInput?.addEventListener('wheel', e => e.preventDefault(), { passive:false });
   window.addEventListener('error', (e)=> console.error('JS Error:', e.message));
 })();
