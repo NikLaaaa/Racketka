@@ -5,31 +5,33 @@ const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
 const fs = require('fs').promises;
+const https = require('https');
 const fetch = global.fetch || require('node-fetch');
 
 const PORT = Number(process.env.PORT || 3000);
 const SECRET_KEY = process.env.SECRET_KEY || 'supersecret';
 const DEPOSIT_WALLET = process.env.DEPOSIT_WALLET || '';
 const TONAPI_KEY = process.env.TONAPI_KEY || '';
-
 if (!DEPOSIT_WALLET) {
   console.warn('⚠️ .env: DEPOSIT_WALLET не задан — автозачисления работать не будут');
 }
 
 const DB_FILE = path.join(__dirname, 'db.json');
 
+// ===== mini DB =====
 async function loadDB() {
   try { return JSON.parse(await fs.readFile(DB_FILE, 'utf8')); }
   catch { return { balances:{}, addressToUser:{}, history:[], withdraws:[], _creditedTxs:{} }; }
 }
 async function saveDB(db) { await fs.writeFile(DB_FILE, JSON.stringify(db,null,2),'utf8'); }
-
 let dbPromise = loadDB();
 
+// ===== app/ws =====
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+// ===== static & json =====
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -64,7 +66,7 @@ app.post('/connect_wallet', async (req,res)=>{
   res.json({ ok:true });
 });
 
-// ===== WITHDRAW: create request (имитация) =====
+// ===== WITHDRAW =====
 app.post('/withdraw', async (req,res)=>{
   const { userId, amount, address } = req.body || {};
   if (!userId || !amount || !address) return res.json({ ok:false, error:'bad params' });
@@ -80,12 +82,224 @@ app.post('/withdraw', async (req,res)=>{
 
 app.get('/_health', (_req,res)=>res.json({ok:true}));
 
+// ===================================================================
+// === GETGEMS GIFTS (cache 5min, limit 200, auto-discovery + fallback)
+// ===================================================================
+const GETGEMS_GQL       = 'https://api.getgems.io/graphql';
+const GIFTS_CACHE_TTL   = 300_000; // 5 минут
+const GIFTS_LIMIT       = 200;     // общее кол-во NFT в ответе /gifts
+let   giftsCache        = { ts: 0, items: [] };
+
+// РЕЗЕРВНЫЙ список коллекций (если авто-поиск не нашёл/упал).
+// Можно переопределить через .env: GIFT_COLLECTIONS=EQ...,EQ...
+const FALLBACK_COLLECTIONS = (process.env.GIFT_COLLECTIONS
+  ? process.env.GIFT_COLLECTIONS.split(',').map(s => s.trim()).filter(Boolean)
+  : [
+    // популярные Telegram Gifts на Getgems (можно дополнять):
+    "EQCMBgeRNOjZo6A_GpF4G66VTA8V4vpSitIZzJP3Qz4ZO5YM", // Bonded Rings
+    "EQCehrkZtKDtVe0qyvBAsrHx3hW-hroQyDrS_MZOOVYth2DG", // Jingle Bells
+    "EQClfiE74LQ4fLq_luFqJpO5iGDn5B_CpnGbuUl_wDZJ2Uzu", // Whipped Cream
+    "EQBq3vn9Vw4lOPeaBgLUvYp4fFG2IEykEB9QM0SevbhSGsQY", // Hot Heart
+    "EQDd5YxQINNRiJgMTEUaTIWihMkZNqmmB8p5CpbZB20iF6gG", // Burning Heart
+    "EQCH4lumKJRLWU0scJi0DAVhGPLf37mW02gKrDiH_iHzwRk0", // Heart Arrow
+    "EQC6zR5J16bPk2WMm45u5hNRqY3uG0KfkVGZei2nk3p8yF8B", // Explosive Heart
+    "EQDY0ChXQmrChSCRQG_iqU4bJSgvnnNGgEe9Jv6WXr2Kt7F1", // Emojis
+    "EQB0F2XJMJW9nmLqQ7SATeNTvEhLO07NGuOsUDgl3fD0PGV8", // Party Popper
+    "EQCuqE4UeWvfpAaPOX1GHTz6Aw7v822lI55kBo4BIpi7Um6I", // Bouquet
+    "EQAE9o6ZHkzX2uE1lGwSr5i_NjS6ChRik0_jxs6NKwLGQuUk", // Champagne
+    "EQDLBDXh7hIXR3k9w9CUgTCe56OA6NLrN_hhWxhXNupP6v0s", // Chocolate
+    "EQBTJ5RnZvG_yiCowsfeHS_TukDn687801Dv0H6BxccVF6yq"  // Coffee Cup
+  ]
+);
+
+// keep-alive агент ускоряет повторные коннекты
+const keepAliveAgent = new https.Agent({ keepAlive: true });
+
+// надёжный GraphQL-клиент с заголовками, таймаутом и ретраями
+async function gqlRequest(query, variables, { retries = 3, timeoutMs = 12000 } = {}) {
+  const body = JSON.stringify({ query, variables });
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const ctrl = new AbortController();
+      const tId = setTimeout(() => ctrl.abort(), timeoutMs);
+
+      const r = await fetch(GETGEMS_GQL, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'accept': 'application/json',
+          // анти-бот/CDN любят эти заголовки
+          'origin':  'https://getgems.io',
+          'referer': 'https://getgems.io/',
+          'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari'
+        },
+        body,
+        agent: keepAliveAgent,
+        signal: ctrl.signal
+      });
+
+      clearTimeout(tId);
+
+      if (!r.ok) {
+        const text = await r.text().catch(() => '');
+        if (attempt < retries) {
+          await new Promise(res => setTimeout(res, 500 * attempt));
+          continue;
+        }
+        throw new Error(`Getgems HTTP ${r.status}: ${text.slice(0,180)}`);
+      }
+
+      const js = await r.json().catch(() => ({}));
+      if (js.errors) {
+        if (attempt < retries) {
+          await new Promise(res => setTimeout(res, 500 * attempt));
+          continue;
+        }
+        throw new Error('Getgems GraphQL errors: ' + JSON.stringify(js.errors).slice(0,180));
+      }
+      return js.data;
+    } catch (e) {
+      if (attempt >= retries) throw e;
+      await new Promise(res => setTimeout(res, 500 * attempt));
+    }
+  }
+}
+
+// — GraphQL запросы —
+const GQL_FIND_COLLECTIONS = `
+query FindGiftCollections($q: String!, $limit: Int!) {
+  collections(
+    filter: { search: $q }
+    orderBy: { field: VOLUME, direction: DESC }
+    first: $limit
+  ) {
+    edges { node { address name } }
+  }
+}`;
+
+const GQL_COLLECTION_ITEMS = `
+query Gifts($address: String!, $limit: Int!) {
+  items(
+    filter: { collectionAddress: $address }
+    orderBy: { field: PRICE, direction: ASC }
+    first: $limit
+  ) {
+    edges {
+      node {
+        address
+        name
+        image { url }
+        bestListing { priceTon }
+        lastSale    { priceTon }
+      }
+    }
+  }
+}`;
+
+const GQL_PING = `query Ping { stats { tvlTon } }`;
+
+// авто-поиск списков коллекций (похоже на /gifts-collection)
+async function discoverGiftCollections() {
+  const KEYS = ['gift', 'gifts', 'telegram gifts', 'tg gifts', 'present', 'ring', 'heart', 'bouquet'];
+  const seen = new Set(); const out = [];
+  const LIMIT_COLLECTIONS = 40;
+
+  for (const q of KEYS) {
+    try {
+      const data  = await gqlRequest(GQL_FIND_COLLECTIONS, { q, limit: 20 });
+      const edges = data?.collections?.edges || [];
+      for (const e of edges) {
+        const addr = e?.node?.address;
+        if (!addr || seen.has(addr)) continue;
+        seen.add(addr);
+        out.push(addr);
+        if (out.length >= LIMIT_COLLECTIONS) return out;
+      }
+    } catch { /* игнор частичных ошибок */ }
+  }
+  return out;
+}
+
+async function fetchCollectionGifts(address, perCollectionLimit = 200) {
+  const data  = await gqlRequest(GQL_COLLECTION_ITEMS, { address, limit: perCollectionLimit });
+  const edges = data?.items?.edges || [];
+  const items = edges.map(e => {
+    const n = e?.node || {};
+    const priceTon =
+      Number(n?.bestListing?.priceTon ?? 0) ||
+      Number(n?.lastSale?.priceTon ?? 0) || 0;
+    const img = n?.image?.url || '';
+    return { id: n.address, name: n.name || 'Gift', priceTon, img, _col: address };
+  });
+  return items.filter(x => x.img && x.priceTon > 0)
+              .sort((a,b) => a.priceTon - b.priceTon);
+}
+
+async function fetchAllGifts() {
+  // 1) пробуем динамически обнаружить коллекции как на /gifts-collection
+  let collections = [];
+  try { collections = await discoverGiftCollections(); } catch {}
+  if (!collections || collections.length === 0) {
+    collections = FALLBACK_COLLECTIONS;
+  }
+
+  // 2) укладываемся в общий лимит
+  const perCol = Math.max(1, Math.floor(GIFTS_LIMIT / Math.max(1, collections.length)));
+
+  // 3) собираем с нескольких коллекций параллельно
+  const res = await Promise.allSettled(
+    collections.map(addr => fetchCollectionGifts(addr, perCol))
+  );
+
+  // 4) склейка, дедуп по id, сортировка, срез
+  const merged = [];
+  for (const r of res) if (r.status === 'fulfilled') merged.push(...r.value);
+
+  const seen = new Set();
+  const unique = [];
+  for (const it of merged) {
+    if (seen.has(it.id)) continue;
+    seen.add(it.id);
+    unique.push(it);
+  }
+
+  return unique
+    .filter(x => x.priceTon > 0)
+    .sort((a,b) => a.priceTon - b.priceTon)
+    .slice(0, GIFTS_LIMIT);
+}
+
+// — routes —
+app.get('/gems_health', async (_req, res) => {
+  try {
+    const data = await gqlRequest(GQL_PING, {});
+    res.json({ ok: true, data });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+app.get('/gifts', async (_req, res) => {
+  try {
+    const now = Date.now();
+    if (now - giftsCache.ts < GIFTS_CACHE_TTL && giftsCache.items.length) {
+      return res.json({ ok: true, items: giftsCache.items });
+    }
+    const items = await fetchAllGifts();
+    giftsCache = { ts: Date.now(), items };
+    res.json({ ok: true, items });
+  } catch (e) {
+    console.error('[/gifts] error', e);
+    res.status(500).json({ ok: false, error: 'getgems fetch failed' });
+  }
+});
+
 // ===== GAME =====
 let online = 0;
 let currentMultiplier = 1.0;
 let phase = 'idle'; // betting/running/finished
-// ws -> { userId, bet, cashed, nick, avatar }
-const clients = new Map();
+const clients = new Map(); // ws -> { userId, bet, cashed, nick, avatar }
 
 function broadcast(obj){
   const msg = JSON.stringify(obj);
@@ -93,49 +307,31 @@ function broadcast(obj){
 }
 
 function startRound(){
-  // на всякий случай подчищаем состояние игроков в начале нового раунда
-  for (const [, st] of clients) {
-    st.bet = 0;
-    st.cashed = false;
-  }
-
   phase='betting';
   currentMultiplier=1.0;
   const endsAt = Date.now()+5000;
   broadcast({ type:'round_start', bettingEndsAt: endsAt });
   setTimeout(runFlight, 5000);
 }
-
 function runFlight(){
   phase='running';
   broadcast({ type:'round_running' });
-
   const tick = ()=>{
     if (phase!=='running') return;
     currentMultiplier = +(currentMultiplier+0.02).toFixed(2);
     broadcast({ type:'multiplier', multiplier: currentMultiplier });
-
     const pCrash = Math.min(0.02 + (currentMultiplier-1)*0.02, 0.40);
     if (Math.random()<pCrash || currentMultiplier>=9.91) endRound(currentMultiplier);
     else setTimeout(tick, Math.max(10, 140 - (currentMultiplier-1)*45));
   };
   setTimeout(tick,120);
 }
-
 async function endRound(finalX){
   phase='finished';
-
-  // >>> КЛЮЧЕВОЙ ФИКС: сбрасываем ставки и флаг кэшаута у всех игроков
-  for (const [, st] of clients) {
-    st.bet = 0;        // проигрыш в этом раунде — ставка не живёт дальше
-    st.cashed = false; // готовим флаг к следующему раунду
-  }
-
   const db = await dbPromise;
   db.history.unshift(finalX);
   db.history = db.history.slice(0,50);
   await saveDB(db);
-
   broadcast({ type:'round_end', result: finalX, history: db.history.slice(0,10) });
   setTimeout(startRound, 1800);
 }
@@ -165,48 +361,40 @@ wss.on('connection', async (ws, req)=>{
     const st = clients.get(ws); if (!st) return;
 
     if (d.type==='profile'){
-      st.nick = d.profile?.nick || ('u'+String(st.userId || '').slice(-4));
+      st.nick = d.profile?.nick || ('u'+String(userId).slice(-4));
       st.avatar = d.profile?.avatar || null;
       return;
     }
-
     if (d.type==='place_bet' && phase==='betting'){
       const amt = Number(d.amount||0);
+      if (!(amt>=0.10)) { // min bet на бэке
+        ws.send(JSON.stringify({ type:'error', message:'Минимальная ставка 0.10 TON' }));
+        return;
+      }
       const db = await dbPromise;
       const bal = Number(db.balances[st.userId]||0);
       if (amt>0 && bal>=amt){
         db.balances[st.userId] = +(bal-amt);
-        st.bet = +(st.bet + amt);   // позволяем докидывать в этот же раунд
+        st.bet = +(st.bet + amt);
         st.cashed=false;
         await saveDB(db);
-
         ws.send(JSON.stringify({ type:'bet_confirm', amount: amt, balance: db.balances[st.userId] }));
         broadcast({ type:'player_bet', userId: st.userId, nick: st.nick, avatar: st.avatar, amount: amt });
       } else {
-        ws.send(JSON.stringify({ type:'error', message:'Недостаточно средств или неверная сумма' }));
+        ws.send(JSON.stringify({ type:'error', message:'Недостаточно TON' }));
       }
       return;
     }
-
     if (d.type==='cashout' && phase==='running' && st.bet>0 && !st.cashed){
-      // Выплата = ставка * текущий множитель * (1 - комиссия)
-      const houseEdge = 0.98; // 2% комисcия
-      const payout = +(st.bet * currentMultiplier * houseEdge).toFixed(2);
-
+      const payout = +(st.bet * currentMultiplier * 0.98).toFixed(2);
       const db = await dbPromise;
       db.balances[st.userId] = +(Number(db.balances[st.userId]||0) + payout);
-
-      st.bet=0;         // ставка «сгорает», игрок вышел из раунда
-      st.cashed=true;   // идемпотентность: повторный кэшаут игнорируем
-
+      st.bet=0; st.cashed=true;
       await saveDB(db);
-
       ws.send(JSON.stringify({ type:'cashout_result', balance: db.balances[st.userId] }));
       broadcast({ type:'player_cashed', userId: st.userId, payout });
       return;
     }
-
-    // Небезопасные/неподходящие по фазе запросы просто игнорим
   });
 
   ws.on('close', ()=>{
@@ -241,7 +429,7 @@ async function pollTonCenter(){
             db._creditedTxs[txId] = true;
             console.log(`+${ton} TON => ${uid} (from ${sender})`);
           }else{
-            db._creditedTxs[txId] = true; // помечаем обработанным, чтобы не спамить
+            db._creditedTxs[txId] = true;
           }
         }
       }
@@ -251,15 +439,11 @@ async function pollTonCenter(){
   setTimeout(pollTonCenter, 6000);
 }
 
+// ===== START =====
 (async ()=>{
   const init = await dbPromise;
-  init.balances ||= {};
-  init.addressToUser ||= {};
-  init.history ||= [];
-  init.withdraws ||= [];
-  init._creditedTxs ||= {};
-  await saveDB(init);
-  dbPromise = Promise.resolve(init);
+  init.balances ||= {}; init.addressToUser ||= {}; init.history ||= []; init.withdraws ||= []; init._creditedTxs ||= {};
+  await saveDB(init); dbPromise = Promise.resolve(init);
 
   pollTonCenter();
 
@@ -268,6 +452,4 @@ async function pollTonCenter(){
     startRound();
   });
 })();
-
-// при желании можешь отключить, если нет файла
-try { require('./bot.cjs'); } catch { /* optional */ }
+try { require('./bot.cjs'); } catch { /* опционально */ }
