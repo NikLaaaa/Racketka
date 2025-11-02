@@ -9,8 +9,7 @@
   const balanceNumEl = $('#balanceNum');
   const multEl = $('#multVal');
   const statusEl = $('#status');
-  const profitEl = $('#profitHint');
-  const giftNowEl = $('#giftNow');
+  const payoutTopEl = $('#payoutTop');
 
   const playersList = $('#playersList');
   const roundTotal = $('#roundTotal');
@@ -63,26 +62,23 @@
   let history3 = [];
   let series = [];
 
-  // ==== gifts dynamic ====
+  // ==== gifts ====
   let GIFTS = [];
   async function loadGifts(){
     try{
       const r = await fetch('/gifts', { cache:'no-store' });
       const js = await r.json();
-      const items = Array.isArray(js.items) ? js.items : [];
-      GIFTS = items.filter(x => Number(x.priceTon) > 0 && x.img)
-                   .sort((a,b)=>a.priceTon-b.priceTon);
+      GIFTS = Array.isArray(js.items) ? js.items.filter(x => x.img && Number(x.priceTon) > 0).sort((a,b)=>a.priceTon-b.priceTon) : [];
     }catch(e){ console.warn('gifts load error', e); }
   }
   loadGifts();
-  setInterval(loadGifts, 300_000); // 5 минут
+  setInterval(loadGifts, 300_000);
 
-  function getGiftForAmount(ton){
-    if (!ton || ton <= 0 || !GIFTS.length) return null;
+  function pickGift(amountTon){
+    if (!GIFTS.length || !amountTon) return null;
     let best = null;
     for (const g of GIFTS){
-      if (ton + 1e-9 >= Number(g.priceTon)) best = g;
-      else break;
+      if (amountTon + 1e-9 >= Number(g.priceTon)) best = g; else break;
     }
     return best;
   }
@@ -157,35 +153,26 @@
     }catch(_){ alert('Ошибка сети'); }
   });
 
-  // ==== Telegram профиль (имя + аватар) ====
+  // ==== Telegram профиль ====
   function applyTgProfile(){
     try{
       const tg = window.Telegram?.WebApp;
-      tg?.ready?.();
-      tg?.expand?.();
+      tg?.ready?.(); tg?.expand?.();
 
       const u = tg?.initDataUnsafe?.user;
-      const nameQS = qs.get('name');
-      const photoQS = qs.get('photo');
+      const nameQS = qs.get('name'); const photoQS = qs.get('photo');
 
-      let displayName = 'User';
-      let photo = null;
-
+      let displayName = 'User'; let photo = null;
       if (u) {
         const composed = [u.first_name, u.last_name].filter(Boolean).join(' ');
         displayName = composed || (u.username ? `@${u.username}` : 'User');
         if (u.photo_url) photo = u.photo_url;
-      } else if (nameQS) {
-        displayName = nameQS;
-        if (photoQS) photo = photoQS;
-      }
+      } else if (nameQS) { displayName = nameQS; if (photoQS) photo = photoQS; }
 
       if (photo) profileAva.src = photo; else profileAva.removeAttribute('src');
       profileName.textContent = displayName;
 
-      const sendProfile = () => {
-        try { ws.send(JSON.stringify({ type:'profile', profile:{ nick: displayName, avatar: photo } })); } catch(_){}
-      };
+      const sendProfile = () => { try { ws.send(JSON.stringify({ type:'profile', profile:{ nick: displayName, avatar: photo } })); } catch(_){ } };
       if (ws.readyState === 1) sendProfile(); else ws.addEventListener('open', sendProfile, { once:true });
     } catch(_) {}
   }
@@ -228,7 +215,7 @@
         betBtn.disabled = true;
         cashoutBtn.disabled = false;
         cashoutBtn.classList.add('active','pulse','armed');
-        updateProfitHint();
+        updateTopPayout();
         break;
 
       case 'cashout_result':
@@ -236,7 +223,7 @@
         state.myBet = 0; state.myCashed = true;
         cashoutBtn.disabled = true;
         cashoutBtn.classList.remove('active','pulse','armed');
-        profitEl.textContent = '';
+        payoutTopEl.textContent = '';
         cashoutLock = false;
         break;
 
@@ -260,32 +247,21 @@
     state.displayedMult = m;
     multEl.textContent = m.toFixed(2);
     pushPoint(m);
-    updateProfitHint();
+    updateTopPayout();
     renderPlayers(); // чтобы подарки у игроков пересчитывались в реальном времени
   }
 
-  function updateProfitHint(){
+  function updateTopPayout(){
     const bet = state.myBet || 0;
     const k = state.displayedMult || 1;
     const cashout = bet * k * HOUSE;
-    const profit = Math.max(0, cashout - bet);
 
-    if (bet > 0 && state.roundState === 'running' && profit > 0) {
-      profitEl.textContent = `+${profit.toFixed(2)}`;
+    if (bet > 0 && state.roundState === 'running' && cashout > 0) {
+      payoutTopEl.textContent = `≈ ${cashout.toFixed(2)} TON`;
     } else {
-      profitEl.textContent = '';
+      payoutTopEl.textContent = '';
     }
     cashoutBtn.classList.toggle('armed', bet > 0 && state.roundState === 'running');
-
-    // подарок возле коэффициента
-    if (bet > 0 && cashout > 0){
-      const gift = getGiftForAmount(cashout);
-      giftNowEl.innerHTML = gift
-        ? `<img src="${gift.img}" alt="${gift.name}"><span>${gift.name} (${Number(gift.priceTon).toFixed(2)} TON)</span>`
-        : `≈ ${cashout.toFixed(2)} TON`;
-    } else {
-      giftNowEl.innerHTML = '';
-    }
   }
 
   function renderHistory(){
@@ -325,16 +301,20 @@
     for (const [,p] of players) total += p.amount||0;
 
     for (const [,p] of players){
-      let giftAmountTon = 0;
+      // расчёт текущей/итоговой суммы в TON
+      let amountTon = 0;
       if (p.cashed) {
-        giftAmountTon = Number(p.payout)||0;
+        amountTon = Number(p.payout)||0;
       } else if (state.roundState === 'running' && p.amount) {
-        giftAmountTon = (Number(p.amount)||0) * (state.displayedMult||1) * HOUSE;
+        amountTon = (Number(p.amount)||0) * (state.displayedMult||1) * HOUSE;
+      } else if (p.amount) {
+        amountTon = Number(p.amount)||0;
       }
-      const gift = getGiftForAmount(giftAmountTon);
+      const gift = pickGift(amountTon);
+
       const giftHTML = gift
-        ? `<div class="pgift"><img src="${gift.img}" alt="${gift.name}"><span>${gift.name}</span></div>`
-        : (giftAmountTon>0 ? `<div class="pgift">≈ ${giftAmountTon.toFixed(2)} TON</div>` : '');
+        ? `<div class="pgift"><img src="${gift.img}" alt="${esc(gift.name)}"><span>${esc(gift.name)} • ${amountTon.toFixed(2)} TON</span></div>`
+        : (amountTon>0 ? `<div class="pgift">≈ ${amountTon.toFixed(2)} TON</div>` : '');
 
       const row = document.createElement('div'); row.className='player';
       row.innerHTML = `
@@ -351,7 +331,7 @@
     roundTotal.textContent = total ? `${total.toFixed(2)} TON` : '';
   }
 
-  // ==== гарантированно «живой» инпут ====
+  // ==== guaranteed focusable input ====
   function ensureBetInputReady(initialValue = ''){
     if (!modalBetInput) return;
     modalBetInput.setAttribute('type','text');
@@ -380,8 +360,7 @@
     state.roundState='betting';
     state.myBet=0; state.myCashed=false;
 
-    placingBet = false;
-    cashoutLock = false;
+    placingBet = false; cashoutLock = false;
     closeModal(betModal);
     ensureBetInputReady('');
 
@@ -393,7 +372,7 @@
     betBtn.disabled=false;
     cashoutBtn.disabled=true;
     cashoutBtn.classList.remove('active','pulse','armed');
-    profitEl.textContent = '';
+    payoutTopEl.textContent = '';
     clearPlayers();
 
     let sec = Math.max(0, Math.round((d.bettingEndsAt - Date.now())/1000));
@@ -414,7 +393,7 @@
       cashoutBtn.disabled=false;
       cashoutBtn.classList.add('active','pulse');
     }
-    updateProfitHint();
+    updateTopPayout();
   }
 
   function onRoundEnd(d){
@@ -424,7 +403,7 @@
     setMult(final);
     statusEl.textContent='КРАШ';
     cashoutBtn.classList.remove('armed');
-    profitEl.textContent = '';
+    payoutTopEl.textContent = '';
     setTimeout(()=>{
       setMult(1.00);
       statusEl.textContent='ожидание…';
