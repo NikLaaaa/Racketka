@@ -101,10 +101,18 @@ function broadcast(obj){
 function startRound(){
   phase = 'betting';
   currentMultiplier = 1.0;
+
+  // 👇 СБРАСЫВАЕМ состояние игроков на новый раунд
+  for (const st of clients.values()) {
+    st.bet = 0;
+    st.cashed = false;
+  }
+
   const endsAt = Date.now() + 5000; // окно ставок 5 секунд
   broadcast({ type:'round_start', bettingEndsAt: endsAt });
   setTimeout(runFlight, 5000);
 }
+
 
 function runFlight(){
   phase = 'running';
@@ -254,3 +262,4 @@ async function pollTonCenter(){
 })();
 
 try { require('./bot.cjs'); } catch { /* опционально */ }
+
