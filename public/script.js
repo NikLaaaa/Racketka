@@ -49,6 +49,13 @@
   // ==== state ====
   const qs = new URLSearchParams(location.search);
   const tg = window.Telegram?.WebApp;
+  // --- Telegram WebApp anti-freeze ---
+try {
+  tg?.ready?.();          // сигнал Telegram, что всё готово
+  tg?.expand?.();         // развернуть вебвью
+  tg?.disableVerticalSwipes?.(); // чтобы свайпы не блокировали тапы (iOS)
+} catch {}
+
   const state = {
     userId: qs.get('userId') || ('guest' + (Math.random()*1e6|0)),
     balance: 0,
@@ -637,3 +644,4 @@
   resizeFixForIOS();
 
 })();
+
