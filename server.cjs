@@ -8,14 +8,14 @@ const fs = require('fs').promises;
 const https = require('https');
 const fetch = global.fetch || require('node-fetch');
 
-const PORT          = Number(process.env.PORT || 3000);
-const SECRET_KEY    = process.env.SECRET_KEY || 'supersecret';
-const DEPOSIT_WALLET= process.env.DEPOSIT_WALLET || '';
-const TONAPI_KEY    = process.env.TONAPI_KEY || '';
-const BOT_TOKEN     = process.env.TELEGRAM_BOT_TOKEN || ''; // нужен для Stars
-const TG            = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : null;
+const PORT = Number(process.env.PORT || 3000);
+const SECRET_KEY = process.env.SECRET_KEY || 'supersecret';
+const DEPOSIT_WALLET = process.env.DEPOSIT_WALLET || '';
+const TONAPI_KEY = process.env.TONAPI_KEY || '';
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''; // нужен для Stars
+const TG = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : null;
 
-if (!DEPOSIT_WALLET) console.warn('⚠️ .env: DEPOSIT_WАЛLET не задан — автозачисления TON не будут работать');
+if (!DEPOSIT_WALLET) console.warn('⚠️ .env: DEPOSIT_WАЛЛЕТ не задан — автозачисления TON не будут работать');
 
 const DB_FILE = path.join(__dirname, 'db.json');
 
@@ -108,7 +108,7 @@ const FALLBACK_COLLECTIONS = (process.env.GIFT_COLLECTIONS
     "EQDY0ChXQmrChSCRQG_iqU4bJSgvnnNGgEe9Jv6WXr2Kt7F1",
     "EQB0F2XJMJW9nmLqQ7SATeNTvEhLO07NGuOsUDgl3fD0PGV8",
     "EQCuqE4UeWvfpAaPOX1GHTз6Aw7v822lI55kBo4BIpi7Um6I",
-    "EQAE9o6ZHkzX2uE1lGwSr5i_NjS6ChRik0_jxs6NKwLGQuUk",
+    "EQAE9o6ZHkзX2uE1lGwSr5i_NjS6ChRik0_jxs6NKwLGQuUk",
     "EQDLBDXh7hIXR3k9w9CUgTCe56OA6NLrN_hhWxhXNupP6v0s",
     "EQBTJ5RnZvG_yiCowsfeHS_TukDn687801Dv0H6BxccVF6yq"
   ]);
@@ -258,21 +258,22 @@ wss.on('connection', async (ws, req)=>{
     let d; try{ d=JSON.parse(raw.toString()); }catch{ return; }
     const st=clients.get(ws); if (!st) return;
 
+    // ⛔ Больше НЕ шлём profile_update, чтобы не появлялся фантомный "User"
     if (d.type==='profile'){
-      st.nick=d.profile?.nick || ('u'+String(userId).slice(-4));
-      st.avatar=d.profile?.avatar || null;
-      broadcast({ type:'profile_update', userId: st.userId, nick: st.nick, avatar: st.avatar });
+      st.nick   = d.profile?.nick || ('u'+String(userId).slice(-4));
+      st.avatar = d.profile?.avatar || null;
       return;
     }
 
     if (d.type==='place_bet' && phase==='betting'){
       const amt=Number(d.amount||0);
-      if (!(amt>=0.10)) return ws.send(JSON.stringify({ type:'error', message:'Минимальная ставка 0.10 TON' }));
-      if (d.profile){ st.nick=d.profile.nick || st.nick; st.avatar=(d.profile.avatar ?? st.avatar) || null; broadcast({ type:'profile_update', userId: st.userId, nick: st.nick, avatar: st.avatar }); }
+      if (!(amt>0)) { ws.send(JSON.stringify({ type:'error', message:'Введите положительное число' })); return; }
+      if (d.profile){ st.nick=d.profile.nick || st.nick; st.avatar=(d.profile.avatar ?? st.avatar) || null; }
       const db=await dbPromise; const bal=Number(db.balances[st.userId]||0);
       if (amt>0 && bal>=amt){
         db.balances[st.userId]=+(bal-amt); st.bet=amt; st.cashed=false; await saveDB(db);
         ws.send(JSON.stringify({ type:'bet_confirm', amount:amt, balance:db.balances[st.userId] }));
+        // Игрок появляется только тут (есть ставка)
         broadcast({ type:'player_bet', userId:st.userId, nick:st.nick, avatar:st.avatar, amount:amt });
       }else ws.send(JSON.stringify({ type:'error', message:'Недостаточно TON' }));
       return;
@@ -325,6 +326,6 @@ async function pollTonCenter(){
   server.listen(PORT, ()=>{ console.log(`🚀 http://localhost:${PORT}`); startRound(); });
 })();
 
-// НЕ включаем polling-бота автоматически (чтобы не ловить 409 на Render)
+// Запускаем polling-бота только если явно включён флагом (чтобы не ловить 409)
 const ENABLE_BOT_POLLING = String(process.env.ENABLE_BOT_POLLING || '').toLowerCase() === 'true';
 if (ENABLE_BOT_POLLING) { try { require('./bot.cjs'); } catch(e){ console.error('bot.cjs load error', e); } }
