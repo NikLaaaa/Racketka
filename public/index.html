@@ -90,5 +90,31 @@
   </div>
 
   <script src="script.js?v=22"></script>
+  <!-- === РУЛЕТКА (кнопка открытия можно куда угодно) === -->
+<button id="openWheelBtn" class="tbtn" style="margin-top:10px;width:100%">Рулетка</button>
+
+<!-- === Модалка рулетки === -->
+<div id="wheelModal" class="modal" aria-hidden="true">
+  <div class="modal-box wheel-box" tabindex="-1">
+    <div class="wheel-header">
+      <div class="prize-pool">Призовой пул</div>
+      <div class="close-x" id="wheelClose">✕</div>
+    </div>
+
+    <div class="wheel-stage">
+      <div class="pointer"></div>
+      <canvas id="wheelCanvas" width="520" height="520"></canvas>
+      <div id="wheelCenter" class="wheel-center">Ожидание</div>
+    </div>
+
+    <div class="wheel-controls">
+      <div class="stars">⭐ <span id="starsBalance">0</span></div>
+      <div class="slider-note">Цена спина: <b>50</b> ⭐</div>
+      <button id="wheelSpinBtn" class="btn primary">Крутить за 50 ⭐</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
+
