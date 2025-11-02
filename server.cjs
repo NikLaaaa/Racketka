@@ -308,11 +308,16 @@ function broadcast(obj){
 
 function startRound(){
   phase='betting';
+
+  for (const st of clients.values()) {
+    st.bet = 0;
+    st.cashed = false;
+  }
+
   currentMultiplier=1.0;
-  const endsAt = Date.now()+5000;
-  broadcast({ type:'round_start', bettingEndsAt: endsAt });
-  setTimeout(runFlight, 5000);
+  ...
 }
+
 function runFlight(){
   phase='running';
   broadcast({ type:'round_running' });
@@ -453,4 +458,5 @@ async function pollTonCenter(){
   });
 })();
 try { require('./bot.cjs'); } catch { /* опционально */ }
+
 
