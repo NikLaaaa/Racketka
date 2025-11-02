@@ -1,7 +1,7 @@
 (()=> {
   // ==== helpers ====
   const $ = s => document.querySelector(s);
-  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const clamp2 = n => (Math.round((Number(n)||0)*100)/100);
 
   // ==== DOM ====
@@ -101,26 +101,16 @@
     }catch{ alert('Ошибка сети'); }
   });
 
-  // ==== Telegram профиль (игра + профиль) ====
-  const CURRENT_PROFILE = { nick: 'User', avatar: null };
+  // ==== Telegram профиль ====
   function applyTgProfile(){
     try{
       const tg = window.Telegram?.WebApp; tg?.ready?.(); tg?.expand?.();
       const u = tg?.initDataUnsafe?.user; const nameQS = qs.get('name'); const photoQS = qs.get('photo');
       let displayName = 'User'; let photo = null;
-      if (u){
-        const composed = [u.first_name,u.last_name].filter(Boolean).join(' ');
-        displayName = composed || (u.username?`@${u.username}`:'User');
-        if (u.photo_url) photo = u.photo_url;
-      } else if (nameQS){
-        displayName = nameQS; if (photoQS) photo = photoQS;
-      }
-      // Профиль
+      if (u){ const composed = [u.first_name,u.last_name].filter(Boolean).join(' '); displayName = composed || (u.username?`@${u.username}`:'User'); if (u.photo_url) photo = u.photo_url; }
+      else if (nameQS){ displayName = nameQS; if (photoQS) photo = photoQS; }
       if (photo) profileAva.src = photo; else profileAva.removeAttribute('src');
       profileName.textContent = displayName;
-
-      CURRENT_PROFILE.nick = displayName; CURRENT_PROFILE.avatar = photo || null;
-
       const send = ()=>{ try{ ws.send(JSON.stringify({ type:'profile', profile:{ nick:displayName, avatar:photo } })); }catch{} };
       if (ws.readyState===1) send(); else ws.addEventListener('open', send, {once:true});
     }catch{}
@@ -156,6 +146,7 @@
 
       case 'player_bet': onPlayerBet(d); break;
       case 'player_cashed': onPlayerCashed(d); break;
+      case 'profile_update': addOrUpdatePlayer(d.userId, d.nick, d.avatar); break;
 
       case 'bet_confirm':
         placingBet = false;
@@ -174,10 +165,6 @@
         cashoutBtn.classList.remove('active','pulse','armed');
         payoutTopEl.textContent = '';
         cashoutLock = false;
-        break;
-
-      case 'profile_update':
-        addOrUpdatePlayer(d.userId, d.nick, d.avatar);
         break;
 
       case 'error':
@@ -239,6 +226,7 @@
     let total=0;
     for (const [,p] of players) total += p.amount||0;
     for (const [,p] of players){
+      if (!(p.amount>0) && !p.cashed) continue; // не рисуем фантомного User
       const ava = p.avatar ? `<img class="pava" src="${esc(p.avatar)}" alt="">` : `<div class="pava pava--ph"></div>`;
       const row = document.createElement('div'); row.className='player';
       row.innerHTML = `
@@ -251,7 +239,7 @@
     roundTotal.textContent = total ? `${total.toFixed(2)} TON` : '';
   }
 
-  // ==== focusable input (ПК/айфон) ====
+  // ==== focusable input (фикс клика на ПК) ====
   function ensureBetInputReady(initialValue=''){
     if (!modalBetInput) return;
     modalBetInput.setAttribute('type','text');
@@ -276,6 +264,7 @@
     placingBet=false; cashoutLock=false;
     closeModal(betModal);
     ensureBetInputReady('');
+    setTimeout(()=> ensureBetInputReady(''), 40);
 
     series = [{x:0,y:1}]; drawChart();
     setMult(1.00);
@@ -329,8 +318,8 @@
     if (!el.classList.contains('open')){
       el.classList.add('open'); el.style.display='flex'; document.body.classList.add('modal-open');
     }
-    modalBox?.addEventListener('click', e=>e.stopPropagation(), { once:true });
-    modalBox?.addEventListener('mousedown', e=>e.stopPropagation(), { once:true });
+    modalBox?.addEventListener('click', e=>e.stopPropagation(), {once:true});
+    modalBox?.addEventListener('mousedown', e=>e.stopPropagation(), {once:true});
     el.addEventListener('click', e=>{ if (e.target===el) closeModal(el); });
     ensureBetInputReady(modalBetInput.value || '');
   }
@@ -348,8 +337,12 @@
     if (state.balance < amt){ alert('Недостаточно TON'); ensureBetInputReady(raw); return; }
     placingBet = true;
     try{
-      // отправляем ставку вместе с профайлом
-      ws.send(JSON.stringify({ type:'place_bet', amount: amt, profile: CURRENT_PROFILE }));
+      const tg = window.Telegram?.WebApp; const u = tg?.initDataUnsafe?.user;
+      const nameQS = qs.get('name'); const photoQS = qs.get('photo');
+      const composed = u ? [u.first_name,u.last_name].filter(Boolean).join(' ') : (nameQS || 'User');
+      const nick = composed || (u?.username ? `@${u.username}` : 'User');
+      const avatar = u?.photo_url || photoQS || null;
+      ws.send(JSON.stringify({ type:'place_bet', amount: amt, profile:{ nick, avatar } }));
       closeModal(betModal); betBtn.disabled = true;
       setTimeout(()=> placingBet=false, 300);
     }catch{ placingBet=false; }
@@ -406,7 +399,6 @@
   const wheelCanvas = $('#wheelCanvas'); const wctx = wheelCanvas?.getContext('2d');
   const wheelCenter = $('#wheelCenter'); const wheelSpinBtn = $('#wheelSpinBtn'); const starsEl = $('#starsBalance');
   const WSTATE = { stars: 0, price: 50, sectors: [], angle: 0, spinning: false, rerollOnce:false };
-
   starsEl.textContent = WSTATE.stars;
 
   async function wheelLoad(){
@@ -470,40 +462,9 @@
     if (fill) wctx.fill(); if (stroke) wctx.stroke();
   }
 
-  // Stars: умный фолбэк (браузер/десктоп)
-  async function buyStarsAndSpin(){
-    const tg = window.Telegram?.WebApp;
-    try{
-      const r = await fetch('/stars/create', {
-        method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({ userId: state.userId, amount: WSTATE.price })
-      }).then(r=>r.json());
-      if (!r.ok) return alert(r.error || 'Ошибка выставления счёта');
-      const { link, payload } = r;
-
-      let paid = false;
-      if (tg && typeof tg.openInvoice === 'function'){
-        const handler = (obj)=>{ if (obj.status==='paid') paid = true; };
-        tg.onEvent('invoiceClosed', handler);
-        try{ await tg.openInvoice(link); }catch{}
-        tg.offEvent && tg.offEvent('invoiceClosed', handler);
-      }
-      if (!paid){ window.open(link, '_blank'); alert('После оплаты вернитесь в игру — проверим платёж и крутанём автоматически.'); }
-
-      const cr = await fetch('/stars/credit', {
-        method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({ userId: state.userId, payload })
-      }).then(r=>r.json());
-      if (!cr.ok) return alert(cr.error || 'Оплата ещё не подтверждена, попробуйте позже');
-
-      WSTATE.stars = cr.stars|0; starsEl.textContent = WSTATE.stars;
-      wheelSpin(true);
-    }catch{ alert('Ошибка сети'); }
-  }
-
   function wheelSpin(pay=true){
     if (WSTATE.spinning) return;
-    if (pay && WSTATE.stars < WSTATE.price){ return buyStarsAndSpin(); }
+    if (pay && WSTATE.stars < WSTATE.price){ alert('Недостаточно ⭐'); return; }
     if (pay){ WSTATE.stars -= WSTATE.price; starsEl.textContent = WSTATE.stars; }
     WSTATE.spinning = true; wheelCenter.textContent='Крутим…';
 
@@ -541,11 +502,47 @@
       WSTATE.rerollOnce=false;
     }
   }
-  wheelSpinBtn?.addEventListener('click', ()=>{
-    if (WSTATE.spinning) return;
-    if (WSTATE.stars < WSTATE.price) return buyStarsAndSpin();
-    WSTATE.rerollOnce=false; wheelSpin(true);
-  });
+  wheelSpinBtn?.addEventListener('click', ()=>{ if (!WSTATE.spinning){ WSTATE.rerollOnce=false; if (WSTATE.stars>=WSTATE.price) wheelSpin(true); else buyStarsAndSpin(); } });
 
-  wheelLoad();
+  async function buyStarsAndSpin(){
+    const tg = window.Telegram?.WebApp;
+    try{
+      const r = await fetch('/stars/create', {
+        method:'POST', headers:{'content-type':'application/json'},
+        body: JSON.stringify({ userId: state.userId, amount: WSTATE.price })
+      }).then(r=>r.json());
+      if (!r.ok) return alert(r.error || 'Ошибка выставления счёта');
+      const { link, payload } = r;
+
+      if (tg && typeof tg.openInvoice === 'function'){
+        await tg.openInvoice(link); // внутри Telegram — без алерта
+      } else {
+        window.open(link, '_blank');
+        alert('После оплаты вернитесь в игру — проверим платёж и крутанём автоматически.');
+      }
+
+      const cr = await fetch('/stars/credit', {
+        method:'POST', headers:{'content-type':'application/json'},
+        body: JSON.stringify({ userId: state.userId, payload })
+      }).then(r=>r.json());
+
+      if (!cr.ok) return alert(cr.error || 'Оплата ещё не подтверждена, попробуйте позже');
+      WSTATE.stars = cr.stars|0; starsEl.textContent = WSTATE.stars;
+
+      wheelSpin(true);
+    }catch{ alert('Ошибка сети'); }
+  }
+
+  // загрузить подарки
+  wheelLoad().finally(()=>{ wheelCenter.textContent='Готово'; });
+
+  // ================== END WHEEL ==================
+
+  // ==== tabs default ====
+  setTab('crash');
+
+  // ==== chart helpers ====
+  function resizeIfNeeded(){ resizeCanvas(); }
+  window.addEventListener('resize', resizeIfNeeded);
+
 })();
