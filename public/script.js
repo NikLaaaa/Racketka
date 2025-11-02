@@ -53,13 +53,14 @@
 
   const players = new Map();
   let placingBet = false;
+  let cashoutLock = false;
   let localTicker = null;
   let history3 = [];
   let series = [];
 
-  // ==== TonConnect (опционально) ====
+  // ==== TonConnect (optional) ====
   let tonConnectUI;
-  const DEPOSIT_WALLET = 'UQDEx5xByv2a4JE95W2EmJKfDe1ZWA0Azs16GTiUlhlESfed'; // замени на свой UQ...
+  const DEPOSIT_WALLET = 'UQDEx5xByv2a4JE95W2EmJKfDe1ZWA0Azs16GTiUlhlESfed';
 
   function getConnectedAddress(){
     return tonConnectUI?.wallet?.account?.address || null;
@@ -135,7 +136,6 @@
       tg?.expand?.();
 
       const u = tg?.initDataUnsafe?.user;
-      // если Telegram недоступен — поддержим ?name= & ?photo=
       const nameQS = qs.get('name');
       const photoQS = qs.get('photo');
 
@@ -151,23 +151,13 @@
         if (photoQS) photo = photoQS;
       }
 
-      if (photo) {
-        profileAva.src = photo;
-      } else {
-        profileAva.removeAttribute('src');
-      }
+      if (photo) profileAva.src = photo; else profileAva.removeAttribute('src');
       profileName.textContent = displayName;
 
-      // Отправим на сервер, если WS уже открыт
-      if (ws.readyState === 1) {
-        ws.send(JSON.stringify({ type:'profile', profile:{ nick: displayName, avatar: photo } }));
-      } else {
-        ws.addEventListener('open', () => {
-          try {
-            ws.send(JSON.stringify({ type:'profile', profile:{ nick: displayName, avatar: photo } }));
-          } catch(_) {}
-        }, { once:true });
-      }
+      const sendProfile = () => {
+        try { ws.send(JSON.stringify({ type:'profile', profile:{ nick: displayName, avatar: photo } })); } catch(_){}
+      };
+      if (ws.readyState === 1) sendProfile(); else ws.addEventListener('open', sendProfile, { once:true });
     } catch(_) {}
   }
   document.addEventListener('DOMContentLoaded', applyTgProfile);
@@ -218,10 +208,12 @@
         cashoutBtn.disabled = true;
         cashoutBtn.classList.remove('active','pulse','armed');
         profitEl.textContent = '';
+        cashoutLock = false;
         break;
 
       case 'error':
         placingBet = false;
+        cashoutLock = false;
         alert(d.message || 'Ошибка');
         break;
     }
@@ -286,10 +278,12 @@
     renderPlayers();
   }
   function clearPlayers(){ players.clear(); renderPlayers(); }
+
   function renderPlayers(){
     playersList.innerHTML = '';
     let total=0;
     for (const [,p] of players) total += p.amount||0;
+
     for (const [,p] of players){
       const row = document.createElement('div'); row.className='player';
       row.innerHTML = `
@@ -311,6 +305,7 @@
     state.myBet=0; state.myCashed=false;
 
     placingBet = false;
+    cashoutLock = false;
     closeModal(betModal);
     modalBetInput.value = '';
     modalBetInput.disabled = false;
@@ -437,13 +432,17 @@
     try {
       ws.send(JSON.stringify({ type:'place_bet', amount: amt }));
       closeModal(betModal);
-    } finally {
-      setTimeout(()=> placingBet=false, 500);
+      betBtn.disabled = true;
+      setTimeout(()=> placingBet=false, 500); // анти-дубль
+    } catch(_) {
+      placingBet = false;
     }
   });
 
   cashoutBtn?.addEventListener('click', ()=>{
+    if (cashoutLock) return;
     if (state.roundState!=='running') return alert('Рано');
+    cashoutLock = true;
     ws.send(JSON.stringify({ type:'cashout' }));
     cashoutBtn.disabled = true;
     cashoutBtn.classList.remove('active','pulse');
@@ -460,7 +459,7 @@
   navCrash?.addEventListener('click', ()=> setTab('crash'));
   navProfile?.addEventListener('click', ()=> setTab('profile'));
 
-  // ==== green line chart ====
+  // ==== chart ====
   function resizeCanvas(){
     if (!chartCanvas) return;
     const rect = chartCanvas.parentElement.getBoundingClientRect();
@@ -513,7 +512,5 @@
 
   // safety
   modalBetInput?.addEventListener('wheel', e => e.preventDefault(), { passive:false });
-
-  // лог ошибок
   window.addEventListener('error', (e)=> console.error('JS Error:', e.message));
 })();
