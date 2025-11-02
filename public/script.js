@@ -1,7 +1,7 @@
 (()=> {
   // ==== helpers ====
   const $ = s => document.querySelector(s);
-  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
   const clamp2 = n => (Math.round((Number(n)||0)*100)/100);
 
   // ==== DOM ====
@@ -102,6 +102,7 @@
   });
 
   // ==== Telegram профиль ====
+  const CURRENT_PROFILE = { nick: 'User', avatar: null };
   function applyTgProfile(){
     try{
       const tg = window.Telegram?.WebApp; tg?.ready?.(); tg?.expand?.();
@@ -110,6 +111,9 @@
       if (u){ const composed = [u.first_name,u.last_name].filter(Boolean).join(' '); displayName = composed || (u.username?`@${u.username}`:'User'); if (u.photo_url) photo = u.photo_url; }
       else if (nameQS){ displayName = nameQS; if (photoQS) photo = photoQS; }
       if (photo) profileAva.src = photo; else profileAva.removeAttribute('src'); profileName.textContent = displayName;
+
+      CURRENT_PROFILE.nick = displayName; CURRENT_PROFILE.avatar = photo || null;
+
       const send = ()=>{ try{ ws.send(JSON.stringify({ type:'profile', profile:{ nick:displayName, avatar:photo } })); }catch{} };
       if (ws.readyState===1) send(); else ws.addEventListener('open', send, {once:true});
     }catch{}
@@ -127,6 +131,7 @@
     switch (d.type) {
       case 'init':
         setBalance(d.balance || 0);
+        if (typeof d.stars === 'number') { WSTATE.stars = d.stars|0; starsEl.textContent = WSTATE.stars; }
         history3 = Array.isArray(d.history) ? d.history.slice(0,3) : [];
         renderHistory();
         setMult(1.00);
@@ -162,6 +167,10 @@
         cashoutBtn.classList.remove('active','pulse','armed');
         payoutTopEl.textContent = '';
         cashoutLock = false;
+        break;
+
+      case 'profile_update':
+        addOrUpdatePlayer(d.userId, d.nick, d.avatar);
         break;
 
       case 'error':
@@ -267,7 +276,6 @@
     cashoutBtn.classList.remove('active','pulse','armed');
     payoutTopEl.textContent = '';
 
-    // НОВОЕ: используем duration от сервера, чтобы не зависеть от часов клиента
     let sec = Math.max(0, Math.round((Number(d.betDurationMs)||5000)/1000));
     statusEl.textContent = `ставки: ${sec}s`;
     const iv = setInterval(()=>{
@@ -330,7 +338,8 @@
     if (state.balance < amt){ alert('Недостаточно TON'); ensureBetInputReady(raw); return; }
     placingBet = true;
     try{
-      ws.send(JSON.stringify({ type:'place_bet', amount: amt }));
+      // отправляем ставку вместе с профайлом
+      ws.send(JSON.stringify({ type:'place_bet', amount: amt, profile: CURRENT_PROFILE }));
       closeModal(betModal); betBtn.disabled = true;
       setTimeout(()=> placingBet=false, 300);
     }catch{ placingBet=false; }
@@ -354,7 +363,7 @@
     navWheel.classList.toggle('active', isWheel);
     navProfile.classList.toggle('active', !isCrash && !isWheel);
 
-    if (isWheel) wheelRender(); // отрисовать рулетку при показе
+    if (isWheel) wheelRender();
   }
   navCrash?.addEventListener('click', ()=> setTab('crash'));
   navWheel?.addEventListener('click', ()=> setTab('wheel'));
@@ -386,7 +395,9 @@
   // ================== WHEEL (5 NFT, 2 No Loot, 1 Re-roll) ==================
   const wheelCanvas = $('#wheelCanvas'); const wctx = wheelCanvas?.getContext('2d');
   const wheelCenter = $('#wheelCenter'); const wheelSpinBtn = $('#wheelSpinBtn'); const starsEl = $('#starsBalance');
-  const WSTATE = { stars: 250, price: 50, sectors: [], angle: 0, spinning: false, rerollOnce:false };
+  const WSTATE = { stars: 0, price: 50, sectors: [], angle: 0, spinning: false, rerollOnce:false };
+
+  // init stars from server (done in ws 'init')
   starsEl.textContent = WSTATE.stars;
 
   async function wheelLoad(){
@@ -453,9 +464,41 @@
     if (fill) wctx.fill(); if (stroke) wctx.stroke();
   }
 
+  async function buyStarsAndSpin(){
+    const tg = window.Telegram?.WebApp;
+    if (!tg){ alert('Откройте мини-приложение в Telegram'); return; }
+    try{
+      const r = await fetch('/stars/create', {
+        method:'POST', headers:{'content-type':'application/json'},
+        body: JSON.stringify({ userId: state.userId, amount: WSTATE.price })
+      }).then(r=>r.json());
+      if (!r.ok) return alert(r.error || 'Ошибка выставления счёта');
+      const { link, payload } = r;
+
+      let paid = false;
+      const handler = (obj)=>{ if (obj.status==='paid') paid = true; };
+      tg.onEvent('invoiceClosed', handler);
+
+      await tg.openInvoice(link);      // фиолетовое окно Stars
+
+      tg.offEvent('invoiceClosed', handler);
+      if (!paid) return;                // отменил
+
+      const cr = await fetch('/stars/credit', {
+        method:'POST', headers:{'content-type':'application/json'},
+        body: JSON.stringify({ userId: state.userId, payload })
+      }).then(r=>r.json());
+
+      if (!cr.ok) return alert(cr.error || 'Оплата ещё не подтверждена, попробуйте позже');
+      WSTATE.stars = cr.stars|0; starsEl.textContent = WSTATE.stars;
+
+      wheelSpin(true);                  // авто-крутка
+    }catch{ alert('Ошибка сети'); }
+  }
+
   function wheelSpin(pay=true){
     if (WSTATE.spinning) return;
-    if (pay && WSTATE.stars < WSTATE.price){ alert('Недостаточно ⭐'); return; }
+    if (pay && WSTATE.stars < WSTATE.price){ return buyStarsAndSpin(); }
     if (pay){ WSTATE.stars -= WSTATE.price; starsEl.textContent = WSTATE.stars; }
     WSTATE.spinning = true; wheelCenter.textContent='Крутим…';
 
@@ -493,7 +536,11 @@
       WSTATE.rerollOnce=false;
     }
   }
-  wheelSpinBtn?.addEventListener('click', ()=>{ if (!WSTATE.spinning){ WSTATE.rerollOnce=false; wheelSpin(true); } });
+  wheelSpinBtn?.addEventListener('click', ()=>{
+    if (WSTATE.spinning) return;
+    if (WSTATE.stars < WSTATE.price) return buyStarsAndSpin();
+    WSTATE.rerollOnce=false; wheelSpin(true);
+  });
 
   // загрузить подарки
   wheelLoad();
