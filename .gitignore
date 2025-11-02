@@ -1,0 +1,6 @@
+# local secrets / data
+.env
+db.json
+balances.db
+*.sqlite
+node_modules/
