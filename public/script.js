@@ -43,7 +43,7 @@
   const ctx = chartCanvas?.getContext?.('2d');
 
   // ==== constants ====
-  const MIN_BET = 0.10;
+  // Минималка убрана — проверяем только > 0
   const HOUSE = 0.98;
 
   // ==== state ====
@@ -105,37 +105,45 @@
   });
 
   // ==== Telegram профиль ====
-  function applyTgProfile(){
-    try{
-      const u = tg?.initDataUnsafe?.user;
-      const nameQS = qs.get('name');
-      const photoQS = qs.get('photo');
-      let displayName = 'User';
-      let photo = null;
-
-      if (u){
-        const composed = [u.first_name,u.last_name].filter(Boolean).join(' ');
-        displayName = composed || (u.username?`@${u.username}`:'User');
-        if (u.photo_url) photo = u.photo_url;
-      } else if (nameQS){
-        displayName = nameQS;
-        if (photoQS) photo = photoQS;
-      }
-      if (photo) profileAva.src = photo; else profileAva.removeAttribute('src');
-      profileName.textContent = displayName;
-
-      const send = ()=>{ try{
-        ws.send(JSON.stringify({ type:'profile', profile:{ nick:displayName, avatar:photo||null } }));
-      }catch{} };
-
-      if (ws.readyState===1) send(); else ws.addEventListener('open', send, {once:true});
-    }catch{}
+  function getTgUser(){
+    try { return tg?.initDataUnsafe?.user || null; } catch { return null; }
   }
-  document.addEventListener('DOMContentLoaded', applyTgProfile);
+  function fillProfileFromTelegram(){
+    const u = getTgUser();
+    const nameQS  = qs.get('name');
+    const photoQS = qs.get('photo');
+
+    let displayName = 'User';
+    let photo = null;
+
+    if (u){
+      const composed = [u.first_name,u.last_name].filter(Boolean).join(' ');
+      displayName = composed || (u.username?`@${u.username}`:'User');
+      if (u.photo_url) photo = u.photo_url;
+    } else if (nameQS){
+      displayName = nameQS;
+      if (photoQS) photo = photoQS;
+    }
+
+    if (photo) profileAva.src = photo; else profileAva.removeAttribute('src');
+    profileName.textContent = displayName;
+    return { nick: displayName, avatar: photo || null };
+  }
+  const currentProfile = fillProfileFromTelegram();
 
   // ==== WebSocket ====
   const wsUrl = location.origin.replace(/^http/,'ws') + `/?userId=${encodeURIComponent(state.userId)}`;
   const ws = new WebSocket(wsUrl);
+
+  function sendProfile(){
+    const p = fillProfileFromTelegram();
+    try { ws.readyState===1 && ws.send(JSON.stringify({ type:'profile', profile: p })); } catch {}
+  }
+  ws.addEventListener('open', () => {
+    sendProfile();
+    setTimeout(sendProfile, 400);
+    setTimeout(sendProfile, 1500);
+  });
 
   ws.onmessage = (ev) => {
     let d; try{ d = JSON.parse(ev.data); } catch { return; }
@@ -149,6 +157,8 @@
         renderHistory();
         setMult(1.00);
         statusEl.textContent='ожидание…';
+        betBtn.disabled = true;          // по умолчанию запрещено
+        sendProfile();                    // дубль
         break;
 
       case 'round_start': onRoundStart(d); break;
@@ -167,7 +177,7 @@
         placingBet = false;
         state.myBet = Number(d.amount)||0;
         setBalance(d.balance ?? state.balance);
-        betBtn.disabled = true;
+        betBtn.disabled = true;          // ставка принята — больше нельзя
         cashoutBtn.disabled = false;
         cashoutBtn.classList.add('active','pulse','armed');
         updateTopPayout();
@@ -180,6 +190,10 @@
         cashoutBtn.classList.remove('active','pulse','armed');
         payoutTopEl.textContent = '';
         cashoutLock = false;
+        break;
+
+      case 'profile_update':
+        addOrUpdatePlayer(d.userId, d.nick, d.avatar);
         break;
 
       case 'error':
@@ -207,7 +221,8 @@
   }
 
   function renderHistory(){
-    const row = $('#crashRow'); row.innerHTML = '';
+    const row = $('#crashRow'); if (!row) return;
+    row.innerHTML = '';
     history3.slice(0,3).forEach(x=>{
       const m = Number(x)||1;
       const el = document.createElement('div');
@@ -253,7 +268,7 @@
     roundTotal.textContent = total ? `${total.toFixed(2)} TON` : '';
   }
 
-  // ==== focusable input (iOS fixes) ====
+  // ==== focusable input (фикс клика на ПК) ====
   function ensureBetInputReady(initialValue=''){
     if (!modalBetInput) return;
     modalBetInput.setAttribute('type','text');
@@ -280,12 +295,11 @@
     series = [{x:0,y:1}]; drawChart();
     setMult(1.00);
     statusEl.textContent='ставки…';
-    betBtn.disabled=false;
+    betBtn.disabled=false;         // только здесь разрешаем ставку
     cashoutBtn.disabled=true;
     cashoutBtn.classList.remove('active','pulse','armed');
     payoutTopEl.textContent = '';
 
-    // duration от сервера
     let sec = Math.max(0, Math.round((Number(d.betDurationMs)||5000)/1000));
     statusEl.textContent = `ставки: ${sec}s`;
     const iv = setInterval(()=>{
@@ -298,6 +312,7 @@
     state.roundState='running';
     statusEl.textContent='в полёте';
     startTicker();
+    betBtn.disabled = true;        // при старте полёта всегда блок
     if (state.myBet>0){ cashoutBtn.disabled=false; cashoutBtn.classList.add('active','pulse'); }
     updateTopPayout();
   }
@@ -309,20 +324,9 @@
     statusEl.textContent='КРАШ';
     cashoutBtn.classList.remove('armed');
     payoutTopEl.textContent = '';
+    betBtn.disabled = true;        // до следующего старта
     setTimeout(()=>{ setMult(1.00); statusEl.textContent='ожидание…'; clearPlayers(); },900);
   }
-
-  // ==== ticker ====
-  function startTicker(){
-    if (localTicker) return;
-    function tick(){ if (state.roundState!=='running'){ stopTicker(); return; }
-      setMult(state.displayedMult + 0.01);
-      const next = Math.max(18, Math.round(180 - (state.displayedMult - 1) * 35));
-      localTicker = setTimeout(tick, next);
-    }
-    tick();
-  }
-  function stopTicker(){ if (localTicker){ clearTimeout(localTicker); localTicker=null; } }
 
   // ==== modal ====
   function openModal(el){
@@ -335,7 +339,10 @@
     ensureBetInputReady(modalBetInput.value || '');
   }
   function closeModal(el){ if (!el) return; el.classList.remove('open'); el.style.display='none'; document.body.classList.remove('modal-open'); }
-  function openBetModal(){ ensureBetInputReady(modalBetInput.value||''); openModal(betModal); }
+  function openBetModal(){
+    if (state.roundState!=='betting'){ alert('Ставки ещё не открыты.'); return; }
+    ensureBetInputReady(modalBetInput.value||''); openModal(betModal);
+  }
   betBtn?.addEventListener('click', openBetModal);
   modalClose?.addEventListener('click', ()=> closeModal(betModal));
   modalBetInput?.addEventListener('keydown', e=>{ if (e.key==='Enter') modalConfirm.click(); });
@@ -343,16 +350,15 @@
   modalConfirm?.addEventListener('click', ()=>{
     const raw = (modalBetInput.value||'').replace(',','.');
     const amt = clamp2(raw);
-    if (!amt || isNaN(amt) || amt < MIN_BET){ alert(`Минимальная ставка ${MIN_BET.toFixed(2)} TON`); ensureBetInputReady(raw); return; }
-    if (state.roundState!=='betting'){ alert('Ставки ещё не открыты. Подожди начала нового раунда.'); return; }
+    if (!amt || isNaN(amt) || amt <= 0){ alert('Введите положительное число'); ensureBetInputReady(raw); return; }
+    if (state.roundState!=='betting'){ alert('Ставки ещё не открыты.'); return; }
     if (state.balance < amt){ alert('Недостаточно TON'); ensureBetInputReady(raw); return; }
 
-    // отправим вместе с профилем
     try{
       const nick = profileName.textContent || 'User';
       const avatar = profileAva.getAttribute('src') || null;
       ws.send(JSON.stringify({ type:'place_bet', amount: amt, profile:{nick,avatar} }));
-      closeModal(betModal); betBtn.disabled = true;
+      closeModal(betModal); betBtn.disabled = true;   // сразу блокируем, чтобы не спамили
     }catch{}
   });
 
@@ -373,8 +379,7 @@
     navCrash.classList.toggle('active', isCrash);
     navWheel.classList.toggle('active', isWheel);
     navProfile.classList.toggle('active', !isCrash && !isWheel);
-
-    if (isWheel) wheelRender(); // отрисовать рулетку при показе
+    if (isWheel) wheelRender();
   }
   navCrash?.addEventListener('click', ()=> setTab('crash'));
   navWheel?.addEventListener('click', ()=> setTab('wheel'));
@@ -406,7 +411,7 @@
   // ================== WHEEL (5 NFT, 2 No Loot, 1 Re-roll) ==================
   const wheelCanvas = $('#wheelCanvas'); const wctx = wheelCanvas?.getContext('2d');
   const wheelCenter = $('#wheelCenter'); const wheelSpinBtn = $('#wheelSpinBtn'); const starsEl = $('#starsBalance');
-  const WSTATE = { stars: 0, price: 50, sectors: [], angle: 0, spinning: false, rerollOnce:false };
+  const WSTATE = { stars: 0, price: 50, sectors: [], angle: 0, spinning: false, rerollOnce:false, pendingPayload:null };
   starsEl.textContent = WSTATE.stars;
 
   async function wheelLoad(){
@@ -473,11 +478,58 @@
     if (fill) wctx.fill(); if (stroke) wctx.stroke();
   }
 
+  // ===== Stars purchase =====
+  async function ensureStars(amount){
+    if (WSTATE.stars >= amount) return true;
+
+    try{
+      const r = await fetch('/stars/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userId:state.userId,amount})}).then(r=>r.json());
+      if (!r.ok) { alert(r.error||'Ошибка выставления счёта'); return false; }
+      WSTATE.pendingPayload = r.payload;
+
+      // Открываем инвойс корректно для мини-приложения
+      const link = r.link;
+      if (tg?.openInvoice){
+        const res = await tg.openInvoice(link); // вернёт "paid"/"cancelled"/"failed" (в актуальных клиентах)
+        if (res === 'paid'){
+          await creditStars(); return true;
+        }
+        // если клиент старый — упадём сюда и попробуем дополлить вручную
+      } else {
+        // запасной вариант (в Вебе/ПК)
+        window.open(link,'_blank');
+        alert('После оплаты вернитесь в игру — проверим платёж и крутнём автоматически.');
+      }
+
+      // Поллим подтверждение
+      const ok = await creditStarsWithPolling(18, 1500);
+      return ok;
+    }catch(e){
+      console.error(e); alert('Не удалось создать счёт');
+      return false;
+    }
+  }
+
+  async function creditStars(){
+    if (!WSTATE.pendingPayload) return false;
+    const r = await fetch('/stars/credit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({userId:state.userId,payload:WSTATE.pendingPayload})}).then(r=>r.json()).catch(()=>null);
+    if (!r || !r.ok){ return false; }
+    WSTATE.stars = Number(r.stars||0); starsEl.textContent = WSTATE.stars;
+    WSTATE.pendingPayload = null;
+    return true;
+  }
+  async function creditStarsWithPolling(tries=15, delay=1200){
+    for (let i=0;i<tries;i++){
+      const ok = await creditStars();
+      if (ok) return true;
+      await new Promise(res=>setTimeout(res, delay));
+    }
+    return false;
+  }
+
   function wheelSpin(pay=true){
     if (WSTATE.spinning) return;
-    if (pay && WSTATE.stars < WSTATE.price){ alert('Недостаточно ⭐'); return; }
-    if (pay){ WSTATE.stars -= WSTATE.price; starsEl.textContent = WSTATE.stars; }
-    WSTATE.spinning = true; wheelCenter.textContent='Крутим…';
+    WSTATE.spinning = true;
 
     const N=WSTATE.sectors.length, step=(Math.PI*2)/N;
     const targetIndex=Math.floor(Math.random()*N);
@@ -514,49 +566,19 @@
     }
   }
 
-  async function creditStars(payload){
-    try{
-      const r = await fetch('/stars/credit',{method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ userId: state.userId, payload })}).then(r=>r.json());
-      if (r.ok){ WSTATE.stars = Number(r.stars||0); starsEl.textContent = WSTATE.stars; }
-      return !!r.ok;
-    }catch{ return false; }
-  }
-
-  async function buyStarsAndSpin(){
-    try{
-      const r = await fetch('/stars/create',{method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ userId: state.userId, amount: WSTATE.price })}).then(r=>r.json());
-      if (!r.ok) { alert(r.error || 'Ошибка создания платежа'); return; }
-      const { link, payload } = r;
-
-      if (tg?.openInvoice){
-        tg.openInvoice(link, async (status)=>{
-          if (status === 'paid'){
-            const ok = await creditStars(payload);
-            if (ok){ wheelSpin(true); }
-          } else if (status !== 'cancelled'){
-            alert('Оплата не прошла.');
-          }
-        });
-      } else {
-        window.open(link, '_blank');
-        alert('После оплаты вернитесь в игру — проверим платёж автоматически.');
-      }
-    }catch{
-      alert('Сбой при создании платежа');
-    }
-  }
-
-  wheelSpinBtn?.addEventListener('click', ()=>{
+  wheelSpinBtn?.addEventListener('click', async ()=>{
     if (WSTATE.spinning) return;
-    if (WSTATE.stars < WSTATE.price){ buyStarsAndSpin(); return; }
-    WSTATE.rerollOnce=false; wheelSpin(true);
+    if (WSTATE.stars < WSTATE.price){
+      const ok = await ensureStars(WSTATE.price);
+      if (!ok) return; // ждём оплату
+    }
+    // списать и крутить
+    WSTATE.stars -= WSTATE.price; starsEl.textContent = WSTATE.stars;
+    WSTATE.rerollOnce=false;
+    wheelSpin(true);
   });
 
   // загрузить подарки
   wheelLoad();
 
-  // стартовая вкладка
-  setTab('crash');
 })();
