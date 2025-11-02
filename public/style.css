@@ -49,8 +49,6 @@ img{display:block}
 .pname{font-weight:600}
 .pval.good{color:var(--ok)}
 .hidden{display:none !important}
-
-/* avatars in players list */
 .pava{width:28px;height:28px;border-radius:50%;background:#233047;margin-right:8px;object-fit:cover}
 .pava--ph{background:#1b2533}
 .pinfo{display:flex;align-items:center;gap:8px}
@@ -71,9 +69,9 @@ img{display:block}
 .tbtn.active{background:#1e2a3d}
 
 /* modal */
-.modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:1000}
+.modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:1000;pointer-events:auto}
 .modal.open{display:flex}
-.modal-box{width:min(480px,92vw);background:#0f1622;border:1px solid #1c2736;border-radius:16px;padding:16px;box-shadow:var(--shadow)}
+.modal-box{width:min(480px,92vw);background:#0f1622;border:1px solid #1c2736;border-radius:16px;padding:16px;box-shadow:var(--shadow);pointer-events:auto}
 .modal-box h3{margin:0 0 10px}
 .modal-box input{width:100%;font-size:18px;padding:12px;border-radius:12px;border:1px solid #273246;background:#0b121d;color:#fff}
 .modal-actions{display:flex;gap:8px;margin-top:10px}
@@ -85,7 +83,7 @@ img{display:block}
   .players{grid-column:2;margin-top:0}
 }
 
-/* ====== WHEEL (вкладка) ====== */
+/* ====== WHEEL ====== */
 .wheel .wheel-stage{position:relative;width:min(92vw,520px);height:min(92vw,520px);margin:6px auto 12px}
 .pointer{position:absolute;left:50%;top:-10px;transform:translateX(-50%);width:0;height:0;border-left:14px solid transparent;border-right:14px solid transparent;border-bottom:20px solid #fff;filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));z-index:2}
 #wheelCanvas{width:100%;height:100%;display:block;border-radius:50%;background:#0c121b;box-shadow:0 12px 36px rgba(0,0,0,.4) inset, 0 6px 26px rgba(0,0,0,.35)}
@@ -93,4 +91,5 @@ img{display:block}
 .wheel-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .wheel-controls .stars{margin-right:auto;opacity:.85}
 .wheel-icon{width:52px;height:52px;border-radius:12px;object-fit:cover;box-shadow:0 3px 10px rgba(0,0,0,.35)}
+@supports(padding:max(0px)) { .footer{ padding-bottom: max(8px, env(safe-area-inset-bottom)); } }
 @media (max-width:480px){ .wheel-center{width:120px;height:120px;font-size:14px} }
