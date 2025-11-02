@@ -40,6 +40,10 @@
   const chartCanvas = $('#chartCanvas');
   const ctx = chartCanvas?.getContext?.('2d');
 
+  // ==== constants ====
+  const MIN_BET = 0.10;      // минимальная ставка
+  const HOUSE = 0.98;        // комиссия (для подсказки профита)
+
   // ==== state ====
   const qs = new URLSearchParams(location.search);
   const state = {
@@ -53,13 +57,14 @@
 
   const players = new Map();
   let placingBet = false;
+  let cashoutLock = false;
   let localTicker = null;
   let history3 = [];
   let series = [];
 
-  // ==== TonConnect (опционально) ====
+  // ==== TonConnect (optional) ====
   let tonConnectUI;
-  const DEPOSIT_WALLET = 'UQDEx5xByv2a4JE95W2EmJKfDe1ZWA0Azs16GTiUlhlESfed'; // замени на свой UQ...
+  const DEPOSIT_WALLET = 'UQDEx5xByv2a4JE95W2EmJKfDe1ZWA0Azs16GTiUlhlESfed';
 
   function getConnectedAddress(){
     return tonConnectUI?.wallet?.account?.address || null;
@@ -135,7 +140,6 @@
       tg?.expand?.();
 
       const u = tg?.initDataUnsafe?.user;
-      // если Telegram недоступен — поддержим ?name= & ?photo=
       const nameQS = qs.get('name');
       const photoQS = qs.get('photo');
 
@@ -151,23 +155,13 @@
         if (photoQS) photo = photoQS;
       }
 
-      if (photo) {
-        profileAva.src = photo;
-      } else {
-        profileAva.removeAttribute('src');
-      }
+      if (photo) profileAva.src = photo; else profileAva.removeAttribute('src');
       profileName.textContent = displayName;
 
-      // Отправим на сервер, если WS уже открыт
-      if (ws.readyState === 1) {
-        ws.send(JSON.stringify({ type:'profile', profile:{ nick: displayName, avatar: photo } }));
-      } else {
-        ws.addEventListener('open', () => {
-          try {
-            ws.send(JSON.stringify({ type:'profile', profile:{ nick: displayName, avatar: photo } }));
-          } catch(_) {}
-        }, { once:true });
-      }
+      const sendProfile = () => {
+        try { ws.send(JSON.stringify({ type:'profile', profile:{ nick: displayName, avatar: photo } })); } catch(_){}
+      };
+      if (ws.readyState === 1) sendProfile(); else ws.addEventListener('open', sendProfile, { once:true });
     } catch(_) {}
   }
   document.addEventListener('DOMContentLoaded', applyTgProfile);
@@ -218,10 +212,12 @@
         cashoutBtn.disabled = true;
         cashoutBtn.classList.remove('active','pulse','armed');
         profitEl.textContent = '';
+        cashoutLock = false;
         break;
 
       case 'error':
         placingBet = false;
+        cashoutLock = false;
         alert(d.message || 'Ошибка');
         break;
     }
@@ -243,7 +239,6 @@
   }
 
   function updateProfitHint(){
-    const HOUSE = 0.98; // комиссия дома (как на сервере)
     const bet = state.myBet || 0;
     const k = state.displayedMult || 1;
     const profit = Math.max(0, bet * k * HOUSE - bet);
@@ -286,10 +281,12 @@
     renderPlayers();
   }
   function clearPlayers(){ players.clear(); renderPlayers(); }
+
   function renderPlayers(){
     playersList.innerHTML = '';
     let total=0;
     for (const [,p] of players) total += p.amount||0;
+
     for (const [,p] of players){
       const row = document.createElement('div'); row.className='player';
       row.innerHTML = `
@@ -305,21 +302,41 @@
     roundTotal.textContent = total ? `${total.toFixed(2)} TON` : '';
   }
 
+  // ==== ensure bet input ready ====
+  function ensureBetInputReady(initialValue = ''){
+    if (!modalBetInput) return;
+    // насильно делаем текстовый инпут и разблокируем
+    modalBetInput.setAttribute('type','text');
+    modalBetInput.setAttribute('inputmode','decimal');
+    modalBetInput.setAttribute('autocomplete','off');
+    modalBetInput.setAttribute('autocapitalize','off');
+    modalBetInput.setAttribute('spellcheck','false');
+    modalBetInput.removeAttribute('readonly');
+    modalBetInput.disabled = false;
+    modalBetInput.value = initialValue;
+
+    // фокус с «повторной попыткой» для десктопных браузеров
+    requestAnimationFrame(() => {
+      modalBetInput.focus();
+      modalBetInput.select();
+      setTimeout(() => {
+        if (document.activeElement !== modalBetInput) {
+          modalBetInput.focus();
+          modalBetInput.select();
+        }
+      }, 50);
+    });
+  }
+
   // ==== round lifecycle ====
   function onRoundStart(d){
     state.roundState='betting';
     state.myBet=0; state.myCashed=false;
 
     placingBet = false;
+    cashoutLock = false;
     closeModal(betModal);
-    modalBetInput.value = '';
-    modalBetInput.disabled = false;
-
-    modalBetInput.setAttribute('type','text');
-    modalBetInput.setAttribute('inputmode','decimal');
-    modalBetInput.setAttribute('autocomplete','off');
-    modalBetInput.setAttribute('autocapitalize','off');
-    modalBetInput.setAttribute('spellcheck','false');
+    ensureBetInputReady('');
 
     series = [{x:0,y:1}];
     drawChart();
@@ -391,22 +408,11 @@
       el.style.display='flex';
       document.body.classList.add('modal-open');
     }
+    // защита от «пролёта» кликов
     modalBox?.addEventListener('click', (e)=> e.stopPropagation());
     el.addEventListener('click', (e)=>{ if (e.target===el) closeModal(el); });
 
-    modalBetInput.disabled = false;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        modalBetInput.focus();
-        modalBetInput.select();
-        setTimeout(() => {
-          if (document.activeElement !== modalBetInput) {
-            modalBetInput.focus();
-            modalBetInput.select();
-          }
-        }, 60);
-      });
-    });
+    ensureBetInputReady(modalBetInput.value || '');
   }
   function closeModal(el){
     if (!el) return;
@@ -420,6 +426,8 @@
       alert('Ставки пока закрыты. Подожди начала раунда.');
       return;
     }
+    // перед открытием всегда нормализуем поле
+    ensureBetInputReady(modalBetInput.value || '');
     openModal(betModal);
   }
 
@@ -429,21 +437,27 @@
 
   modalConfirm?.addEventListener('click', ()=>{
     if (placingBet) return;
-    const amt = Number((modalBetInput.value||'').replace(',','.'));
-    if (!amt || amt<=0) { alert('Введите сумму'); return; }
-    if (state.balance < amt) { alert('Недостаточно TON'); return; }
+    // парсим и валидируем
+    const raw = (modalBetInput.value||'').replace(',','.');
+    const amt = Math.round((Number(raw) + Number.EPSILON) * 100) / 100; // до сотых
+    if (!amt || amt < MIN_BET) { alert(`Минимальная ставка ${MIN_BET.toFixed(2)} TON`); ensureBetInputReady(raw); return; }
+    if (state.balance < amt) { alert('Недостаточно TON'); ensureBetInputReady(raw); return; }
 
     placingBet = true;
     try {
       ws.send(JSON.stringify({ type:'place_bet', amount: amt }));
       closeModal(betModal);
-    } finally {
-      setTimeout(()=> placingBet=false, 500);
+      betBtn.disabled = true;
+      setTimeout(()=> placingBet=false, 400); // анти-дубль
+    } catch(_) {
+      placingBet = false;
     }
   });
 
   cashoutBtn?.addEventListener('click', ()=>{
+    if (cashoutLock) return;
     if (state.roundState!=='running') return alert('Рано');
+    cashoutLock = true;
     ws.send(JSON.stringify({ type:'cashout' }));
     cashoutBtn.disabled = true;
     cashoutBtn.classList.remove('active','pulse');
@@ -460,7 +474,7 @@
   navCrash?.addEventListener('click', ()=> setTab('crash'));
   navProfile?.addEventListener('click', ()=> setTab('profile'));
 
-  // ==== green line chart ====
+  // ==== chart ====
   function resizeCanvas(){
     if (!chartCanvas) return;
     const rect = chartCanvas.parentElement.getBoundingClientRect();
@@ -511,9 +525,7 @@
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
 
-  // safety
+  // safety: блокируем «прокрутку» на поле
   modalBetInput?.addEventListener('wheel', e => e.preventDefault(), { passive:false });
-
-  // лог ошибок
   window.addEventListener('error', (e)=> console.error('JS Error:', e.message));
 })();
