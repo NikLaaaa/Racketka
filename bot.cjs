@@ -14,8 +14,12 @@ const bot = new TelegramBot(TOKEN, { polling: true });
 async function safeJSON(res){
   const t = await res.text();
   try{ return JSON.parse(t); }
-  catch{ console.log('\n===== NOT JSON =====\n'+t+'\n====================\n'); return { ok:false, error:'server not json' }; }
+  catch{
+    console.log('\n===== NOT JSON =====\n'+t+'\n====================\n');
+    return { ok:false, error:'server not json' };
+  }
 }
+
 async function grant(userId, amount){
   try{
     const res = await fetch(`${SERVER_URL}/grant`, {
@@ -24,26 +28,48 @@ async function grant(userId, amount){
       body: JSON.stringify({ userId:String(userId), amount:Number(amount) })
     });
     return await safeJSON(res);
-  }catch{ return { ok:false, error:'no server' }; }
+  }catch{
+    return { ok:false, error:'no server' };
+  }
 }
 
+// ---------- красивое приветствие ----------
 bot.onText(/\/start/, msg=>{
+  const name = msg.from.first_name || 'друг';
   const url = `${SERVER_URL}/?userId=${msg.from.id}`;
-  bot.sendMessage(msg.chat.id, '🚀 Открой игру:', {
-    reply_markup:{ inline_keyboard:[[ { text:'Открыть', web_app:{ url } } ]] }
+
+  const text =
+    `✨ <b>Привет, ${name}!</b>\n\n` +
+    `Желаю тебе сорвать крупный выигрыш в нашем казино 🚀💰\n` +
+    `Удача сегодня явно на твоей стороне 😉`;
+
+  bot.sendMessage(msg.chat.id, text, {
+    parse_mode: 'HTML',
+    reply_markup:{
+      inline_keyboard:[
+        [{ text:'🎮 Открыть игру', web_app:{ url } }]
+      ]
+    }
   });
 });
 
+// ---------- /give1000 ----------
 bot.onText(/\/give1000/, async msg=>{
   if (String(msg.from.id)!==ADMIN_ID) return bot.sendMessage(msg.chat.id,'🚫 Нет прав');
   const r = await grant(msg.from.id, 1000);
   bot.sendMessage(msg.chat.id, r.ok ? `✅ Баланс: ${r.balance}` : `❌ ${r.error}`);
 });
 
+// ---------- /give <id> <amount> ----------
 bot.onText(/\/give (\d+) (\d+(\.\d+)?)/, async (msg, m)=>{
   if (String(msg.from.id)!==ADMIN_ID) return bot.sendMessage(msg.chat.id,'🚫 Нет прав');
   const r = await grant(m[1], Number(m[2]));
-  bot.sendMessage(msg.chat.id, r.ok ? `💸 Выдал ${m[2]} TON для ${m[1]}\nБаланс: ${r.balance}` : `❌ ${r.error}`);
+  bot.sendMessage(
+    msg.chat.id,
+    r.ok
+      ? `💸 Выдал ${m[2]} TON для ${m[1]}\nБаланс: ${r.balance}`
+      : `❌ ${r.error}`
+  );
 });
 
 console.log('🤖 Bot polling started…');
