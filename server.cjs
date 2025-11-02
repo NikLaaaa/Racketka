@@ -11,6 +11,7 @@ const PORT = Number(process.env.PORT || 3000);
 const SECRET_KEY = process.env.SECRET_KEY || 'supersecret';
 const DEPOSIT_WALLET = process.env.DEPOSIT_WALLET || '';
 const TONAPI_KEY = process.env.TONAPI_KEY || '';
+
 if (!DEPOSIT_WALLET) {
   console.warn('⚠️ .env: DEPOSIT_WALLET не задан — автозачисления работать не будут');
 }
@@ -83,7 +84,8 @@ app.get('/_health', (_req,res)=>res.json({ok:true}));
 let online = 0;
 let currentMultiplier = 1.0;
 let phase = 'idle'; // betting/running/finished
-const clients = new Map(); // ws -> { userId, bet, cashed, nick, avatar }
+// ws -> { userId, bet, cashed, nick, avatar }
+const clients = new Map();
 
 function broadcast(obj){
   const msg = JSON.stringify(obj);
@@ -91,31 +93,49 @@ function broadcast(obj){
 }
 
 function startRound(){
+  // на всякий случай подчищаем состояние игроков в начале нового раунда
+  for (const [, st] of clients) {
+    st.bet = 0;
+    st.cashed = false;
+  }
+
   phase='betting';
   currentMultiplier=1.0;
   const endsAt = Date.now()+5000;
   broadcast({ type:'round_start', bettingEndsAt: endsAt });
   setTimeout(runFlight, 5000);
 }
+
 function runFlight(){
   phase='running';
   broadcast({ type:'round_running' });
+
   const tick = ()=>{
     if (phase!=='running') return;
     currentMultiplier = +(currentMultiplier+0.02).toFixed(2);
     broadcast({ type:'multiplier', multiplier: currentMultiplier });
+
     const pCrash = Math.min(0.02 + (currentMultiplier-1)*0.02, 0.40);
     if (Math.random()<pCrash || currentMultiplier>=9.91) endRound(currentMultiplier);
     else setTimeout(tick, Math.max(10, 140 - (currentMultiplier-1)*45));
   };
   setTimeout(tick,120);
 }
+
 async function endRound(finalX){
   phase='finished';
+
+  // >>> КЛЮЧЕВОЙ ФИКС: сбрасываем ставки и флаг кэшаута у всех игроков
+  for (const [, st] of clients) {
+    st.bet = 0;        // проигрыш в этом раунде — ставка не живёт дальше
+    st.cashed = false; // готовим флаг к следующему раунду
+  }
+
   const db = await dbPromise;
   db.history.unshift(finalX);
   db.history = db.history.slice(0,50);
   await saveDB(db);
+
   broadcast({ type:'round_end', result: finalX, history: db.history.slice(0,10) });
   setTimeout(startRound, 1800);
 }
@@ -145,34 +165,48 @@ wss.on('connection', async (ws, req)=>{
     const st = clients.get(ws); if (!st) return;
 
     if (d.type==='profile'){
-      st.nick = d.profile?.nick || ('u'+String(userId).slice(-4));
+      st.nick = d.profile?.nick || ('u'+String(st.userId || '').slice(-4));
       st.avatar = d.profile?.avatar || null;
       return;
     }
+
     if (d.type==='place_bet' && phase==='betting'){
       const amt = Number(d.amount||0);
       const db = await dbPromise;
       const bal = Number(db.balances[st.userId]||0);
       if (amt>0 && bal>=amt){
         db.balances[st.userId] = +(bal-amt);
-        st.bet = +(st.bet + amt);
+        st.bet = +(st.bet + amt);   // позволяем докидывать в этот же раунд
         st.cashed=false;
         await saveDB(db);
+
         ws.send(JSON.stringify({ type:'bet_confirm', amount: amt, balance: db.balances[st.userId] }));
         broadcast({ type:'player_bet', userId: st.userId, nick: st.nick, avatar: st.avatar, amount: amt });
+      } else {
+        ws.send(JSON.stringify({ type:'error', message:'Недостаточно средств или неверная сумма' }));
       }
       return;
     }
+
     if (d.type==='cashout' && phase==='running' && st.bet>0 && !st.cashed){
-      const payout = +(st.bet * currentMultiplier * 0.98).toFixed(2);
+      // Выплата = ставка * текущий множитель * (1 - комиссия)
+      const houseEdge = 0.98; // 2% комисcия
+      const payout = +(st.bet * currentMultiplier * houseEdge).toFixed(2);
+
       const db = await dbPromise;
       db.balances[st.userId] = +(Number(db.balances[st.userId]||0) + payout);
-      st.bet=0; st.cashed=true;
+
+      st.bet=0;         // ставка «сгорает», игрок вышел из раунда
+      st.cashed=true;   // идемпотентность: повторный кэшаут игнорируем
+
       await saveDB(db);
+
       ws.send(JSON.stringify({ type:'cashout_result', balance: db.balances[st.userId] }));
       broadcast({ type:'player_cashed', userId: st.userId, payout });
       return;
     }
+
+    // Небезопасные/неподходящие по фазе запросы просто игнорим
   });
 
   ws.on('close', ()=>{
@@ -219,8 +253,13 @@ async function pollTonCenter(){
 
 (async ()=>{
   const init = await dbPromise;
-  init.balances ||= {}; init.addressToUser ||= {}; init.history ||= []; init.withdraws ||= []; init._creditedTxs ||= {};
-  await saveDB(init); dbPromise = Promise.resolve(init);
+  init.balances ||= {};
+  init.addressToUser ||= {};
+  init.history ||= [];
+  init.withdraws ||= [];
+  init._creditedTxs ||= {};
+  await saveDB(init);
+  dbPromise = Promise.resolve(init);
 
   pollTonCenter();
 
@@ -229,5 +268,6 @@ async function pollTonCenter(){
     startRound();
   });
 })();
-require('./bot.cjs');
 
+// при желании можешь отключить, если нет файла
+try { require('./bot.cjs'); } catch { /* optional */ }
