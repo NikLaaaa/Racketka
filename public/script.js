@@ -10,6 +10,7 @@
   const multEl = $('#multVal');
   const statusEl = $('#status');
   const profitEl = $('#profitHint');
+  const giftNowEl = $('#giftNow');
 
   const playersList = $('#playersList');
   const roundTotal = $('#roundTotal');
@@ -41,8 +42,8 @@
   const ctx = chartCanvas?.getContext?.('2d');
 
   // ==== constants ====
-  const MIN_BET = 0.10;   // минимальная ставка
-  const HOUSE = 0.98;     // комиссия (подсказка прибыли)
+  const MIN_BET = 0.10;
+  const HOUSE = 0.98;
 
   // ==== state ====
   const qs = new URLSearchParams(location.search);
@@ -61,6 +62,30 @@
   let localTicker = null;
   let history3 = [];
   let series = [];
+
+  // ==== gifts dynamic ====
+  let GIFTS = [];
+  async function loadGifts(){
+    try{
+      const r = await fetch('/gifts', { cache:'no-store' });
+      const js = await r.json();
+      const items = Array.isArray(js.items) ? js.items : [];
+      GIFTS = items.filter(x => Number(x.priceTon) > 0 && x.img)
+                   .sort((a,b)=>a.priceTon-b.priceTon);
+    }catch(e){ console.warn('gifts load error', e); }
+  }
+  loadGifts();
+  setInterval(loadGifts, 300_000); // 5 минут
+
+  function getGiftForAmount(ton){
+    if (!ton || ton <= 0 || !GIFTS.length) return null;
+    let best = null;
+    for (const g of GIFTS){
+      if (ton + 1e-9 >= Number(g.priceTon)) best = g;
+      else break;
+    }
+    return best;
+  }
 
   // ==== TonConnect (optional) ====
   let tonConnectUI;
@@ -236,19 +261,31 @@
     multEl.textContent = m.toFixed(2);
     pushPoint(m);
     updateProfitHint();
+    renderPlayers(); // чтобы подарки у игроков пересчитывались в реальном времени
   }
 
   function updateProfitHint(){
     const bet = state.myBet || 0;
     const k = state.displayedMult || 1;
-    const profit = Math.max(0, bet * k * HOUSE - bet);
+    const cashout = bet * k * HOUSE;
+    const profit = Math.max(0, cashout - bet);
+
     if (bet > 0 && state.roundState === 'running' && profit > 0) {
       profitEl.textContent = `+${profit.toFixed(2)}`;
     } else {
       profitEl.textContent = '';
     }
-    const armed = bet > 0 && state.roundState === 'running';
-    cashoutBtn.classList.toggle('armed', armed);
+    cashoutBtn.classList.toggle('armed', bet > 0 && state.roundState === 'running');
+
+    // подарок возле коэффициента
+    if (bet > 0 && cashout > 0){
+      const gift = getGiftForAmount(cashout);
+      giftNowEl.innerHTML = gift
+        ? `<img src="${gift.img}" alt="${gift.name}"><span>${gift.name} (${Number(gift.priceTon).toFixed(2)} TON)</span>`
+        : `≈ ${cashout.toFixed(2)} TON`;
+    } else {
+      giftNowEl.innerHTML = '';
+    }
   }
 
   function renderHistory(){
@@ -288,6 +325,17 @@
     for (const [,p] of players) total += p.amount||0;
 
     for (const [,p] of players){
+      let giftAmountTon = 0;
+      if (p.cashed) {
+        giftAmountTon = Number(p.payout)||0;
+      } else if (state.roundState === 'running' && p.amount) {
+        giftAmountTon = (Number(p.amount)||0) * (state.displayedMult||1) * HOUSE;
+      }
+      const gift = getGiftForAmount(giftAmountTon);
+      const giftHTML = gift
+        ? `<div class="pgift"><img src="${gift.img}" alt="${gift.name}"><span>${gift.name}</span></div>`
+        : (giftAmountTon>0 ? `<div class="pgift">≈ ${giftAmountTon.toFixed(2)} TON</div>` : '');
+
       const row = document.createElement('div'); row.className='player';
       row.innerHTML = `
         <div class="pinfo">
@@ -295,7 +343,8 @@
           <div class="pname">${esc(p.nick||'User')}</div>
         </div>
         <div class="pval ${p.cashed ? 'good' : ''}">
-          ${p.cashed ? `+${(p.payout||0).toFixed(2)}` : (p.amount ? (p.amount||0).toFixed(2) : '')}
+          <div>${p.cashed ? `+${(p.payout||0).toFixed(2)}` : (p.amount ? (p.amount||0).toFixed(2) : '')}</div>
+          ${giftHTML}
         </div>`;
       playersList.appendChild(row);
     }
