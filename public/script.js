@@ -564,6 +564,7 @@
 
   // загрузить подарки
   wheelLoad();
+  setTab('crash');
 
   // ======== ANTI-FREEZE / DIAG ========
   (function antiFreeze(){
@@ -586,3 +587,4 @@
   })();
 
 })();
+
