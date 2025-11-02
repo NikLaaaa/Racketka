@@ -12,8 +12,11 @@ const PORT = Number(process.env.PORT || 3000);
 const SECRET_KEY = process.env.SECRET_KEY || 'supersecret';
 const DEPOSIT_WALLET = process.env.DEPOSIT_WALLET || '';
 const TONAPI_KEY = process.env.TONAPI_KEY || '';
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TG = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : null;
+
 if (!DEPOSIT_WALLET) {
-  console.warn('⚠️ .env: DEPOSIT_WALLET не задан — автозачисления работать не будут');
+  console.warn('⚠️ .env: DEPOSIT_WALLET не задан — автозачисления TON не будут работать');
 }
 
 const DB_FILE = path.join(__dirname, 'db.json');
@@ -21,7 +24,7 @@ const DB_FILE = path.join(__dirname, 'db.json');
 // ===== mini DB =====
 async function loadDB() {
   try { return JSON.parse(await fs.readFile(DB_FILE, 'utf8')); }
-  catch { return { balances:{}, addressToUser:{}, history:[], withdraws:[], _creditedTxs:{} }; }
+  catch { return { balances:{}, stars:{}, addressToUser:{}, history:[], withdraws:[], _creditedTxs:{}, _creditedStars:{} }; }
 }
 async function saveDB(db) { await fs.writeFile(DB_FILE, JSON.stringify(db,null,2),'utf8'); }
 let dbPromise = loadDB();
@@ -44,7 +47,7 @@ app.get('/tonconnect-manifest.json', async (_req,res)=>{
   }
 });
 
-// ===== ADMIN: GRANT =====
+// ===== ADMIN: GRANT (TON) =====
 app.post('/grant', async (req,res)=>{
   if (req.headers['x-admin-secret'] !== SECRET_KEY) return res.status(403).json({ ok:false, error:'bad secret' });
   const { userId, amount } = req.body || {};
@@ -54,6 +57,17 @@ app.post('/grant', async (req,res)=>{
   db.balances[userId] = Number(db.balances[userId] || 0) + Number(amount);
   await saveDB(db);
   res.json({ ok:true, balance: db.balances[userId] });
+});
+
+// ===== ADMIN: GRANT STARS (для /givestars) =====
+app.post('/grant_stars', async (req,res)=>{
+  if (req.headers['x-admin-secret'] !== SECRET_KEY) return res.status(403).json({ ok:false, error:'bad secret' });
+  const { userId, amount } = req.body || {};
+  if (!userId || !amount) return res.json({ ok:false, error:'bad params' });
+  const db = await dbPromise;
+  db.stars[userId] = Number(db.stars[userId]||0) + Number(amount);
+  await saveDB(db);
+  res.json({ ok:true, stars: db.stars[userId] });
 });
 
 // ===== CLIENT: CONNECT WALLET (map address -> user) =====
@@ -93,20 +107,19 @@ let   giftsCache        = { ts: 0, items: [] };
 const FALLBACK_COLLECTIONS = (process.env.GIFT_COLLECTIONS
   ? process.env.GIFT_COLLECTIONS.split(',').map(s => s.trim()).filter(Boolean)
   : [
-    // несколько популярных Telegram Gifts (можно дополнять)
-    "EQCMBgeRNOjZo6A_GpF4G66VTA8V4vpSitIZzJP3Qz4ZO5YM", // Bonded Rings
-    "EQCehrkZtKDtVe0qyvBAsrHx3hW-hroQyDrS_MZOOVYth2DG", // Jingle Bells
-    "EQClfiE74LQ4fLq_luFqJpO5iGDn5B_CpnGbuUl_wDZJ2Uzu", // Whipped Cream
-    "EQBq3vn9Vw4lOPeaBgLUvYp4fFG2IEykEB9QM0SevbhSGsQY", // Hot Heart
-    "EQDd5YxQINNRiJgMTEUaTIWihMkZNqmmB8p5CpbZB20iF6gG", // Burning Heart
-    "EQCH4lumKJRLWU0scJi0DAVhGPLf37mW02gKrDiH_iHzwRk0", // Heart Arrow
-    "EQC6zR5J16bPk2WMm45u5hNRqY3uG0KfkVGZei2nk3p8yF8B", // Explosive Heart
-    "EQDY0ChXQmrChSCRQG_iqU4bJSgvnnNGgEe9Jv6WXr2Kt7F1", // Emojis
-    "EQB0F2XJMJW9nmLqQ7SATeNTvEhLO07NGuOsUDgl3fD0PGV8", // Party Popper
-    "EQCuqE4UeWvfpAaPOX1GHTz6Aw7v822lI55kBo4BIpi7Um6I", // Bouquet
-    "EQAE9o6ZHkzX2uE1lGwSr5i_NjS6ChRik0_jxs6NKwLGQuUk", // Champagne
-    "EQDLBDXh7hIXR3k9w9CUgTCe56OA6NLrN_hhWxhXNupP6v0s", // Chocolate
-    "EQBTJ5RnZvG_yiCowsfeHS_TukDn687801Dv0H6BxccVF6yq"  // Coffee Cup
+    "EQCMBgeRNOjZo6A_GpF4G66VTA8V4vpSitIZzJP3Qz4ZO5YM",
+    "EQCehrkZtKDtVe0qyvBAsrHx3hW-hroQyDrS_MZOOVYth2DG",
+    "EQClfiE74LQ4fLq_luFqJpO5iGDn5B_CpnGbuUl_wDZJ2Uzu",
+    "EQBq3vn9Vw4lOPeaBgLUvYp4fFG2IEykEB9QM0SevbhSGsQY",
+    "EQDd5YxQINNRiJgMTEUaTIWihMkZNqmmB8p5CpbZB20iF6gG",
+    "EQCH4lumKJRLWU0scJi0DAVhGPLf37mW02gKrDiH_iHzwRk0",
+    "EQC6zR5J16bPk2WMm45u5hNRqY3uG0KfkVGZei2nk3p8yF8B",
+    "EQDY0ChXQmrChSCRQG_iqU4bJSgvnnNGgEe9Jv6WXr2Kt7F1",
+    "EQB0F2XJMJW9nmLqQ7SATeNTvEhLO07NGuOsUDgl3fD0PGV8",
+    "EQCuqE4UeWvfpAaPOX1GHTz6Aw7v822lI55kBo4BIpi7Um6I",
+    "EQAE9o6ZHkzX2uE1lGwSr5i_NjS6ChRik0_jxs6NKwLGQuUk",
+    "EQDLBDXh7hIXR3k9w9CUgTCe56OA6NLrN_hhWxhXNupP6v0s",
+    "EQBTJ5RnZvG_yiCowsfeHS_TukDn687801Dv0H6BxccVF6yq"
   ]
 );
 
@@ -249,6 +262,53 @@ app.get('/gifts', async (_req, res) => {
   }
 });
 
+// ===== STARS (Telegram Stars)
+app.post('/stars/create', async (req, res) => {
+  try{
+    if (!TG) return res.status(500).json({ ok:false, error:'BOT_TOKEN not set' });
+    const { userId, amount } = req.body||{};
+    const stars = Number(amount||0);
+    if (!userId || !stars) return res.json({ ok:false, error:'bad params' });
+
+    const payload = `wheel:${userId}:${Date.now()}:${stars}`;
+    const body = {
+      title: 'Wheel spin',
+      description: 'Покупка 50 ⭐ для спина',
+      payload,
+      currency: 'XTR',
+      prices: [{ label:'⭐', amount: stars }]
+    };
+    const r = await fetch(`${TG}/createInvoiceLink`, {
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify(body)
+    }).then(r=>r.json());
+    if (!r.ok) return res.json({ ok:false, error: r.description || 'tg error' });
+    res.json({ ok:true, link: r.result, payload });
+  }catch(e){ res.status(500).json({ ok:false, error: String(e.message||e) }); }
+});
+
+app.post('/stars/credit', async (req, res) => {
+  try{
+    if (!TG) return res.status(500).json({ ok:false, error:'BOT_TOKEN not set' });
+    const { userId, payload } = req.body||{};
+    if (!userId || !payload) return res.json({ ok:false, error:'bad params' });
+    const db = await dbPromise;
+    if (db._creditedStars[payload]) return res.json({ ok:true, already:true, stars: db.stars[userId]||0 });
+
+    const tx = await fetch(`${TG}/getStarTransactions`, { method:'POST' }).then(r=>r.json()).catch(()=>null);
+    const list = (tx && tx.ok && Array.isArray(tx.result)) ? tx.result : [];
+    const okTx = list.find(t => String(t.invoice_payload||t.payload||'')===payload);
+    if (!okTx) return res.json({ ok:false, error:'payment not found yet' });
+
+    const stars = Number((payload.split(':')[3])||50) || 50;
+
+    db.stars[userId] = Number(db.stars[userId]||0) + stars;
+    db._creditedStars[payload] = true;
+    await saveDB(db);
+    res.json({ ok:true, stars: db.stars[userId] });
+  }catch(e){ res.status(500).json({ ok:false, error: String(e.message||e) }); }
+});
+
 // ===== GAME (Crash) =====
 let online = 0;
 let currentMultiplier = 1.0;
@@ -264,10 +324,9 @@ function startRound(){
   phase = 'betting';
   currentMultiplier = 1.0;
 
-  // сбросим ставки/состояния у всех игроков на старте
   for (const st of clients.values()) { st.bet = 0; st.cashed = false; }
 
-  const BET_MS = 5000; // ровно 5с окно ставок
+  const BET_MS = 5000;
   const endsAtTs = Date.now() + BET_MS;
   broadcast({ type:'round_start', bettingEndsAt: endsAtTs, betDurationMs: BET_MS });
 
@@ -306,11 +365,13 @@ wss.on('connection', async (ws, req)=>{
 
   const db = await dbPromise;
   if (db.balances[userId]==null) db.balances[userId]=0;
+  if (db.stars[userId]==null)     db.stars[userId]=0;
   await saveDB(db);
 
   ws.send(JSON.stringify({
     type:'init',
     balance: Number(db.balances[userId]||0),
+    stars:   Number(db.stars[userId]||0),
     players:[],
     history: db.history || [],
     wallet:null,
@@ -325,15 +386,23 @@ wss.on('connection', async (ws, req)=>{
     if (d.type==='profile'){
       st.nick = d.profile?.nick || ('u'+String(userId).slice(-4));
       st.avatar = d.profile?.avatar || null;
+      broadcast({ type:'profile_update', userId: st.userId, nick: st.nick, avatar: st.avatar });
       return;
     }
 
     if (d.type==='place_bet' && phase==='betting'){
       const amt = Number(d.amount||0);
-      if (!(amt>=0.10)) { // мин. ставка
+      if (!(amt>=0.10)) {
         ws.send(JSON.stringify({ type:'error', message:'Минимальная ставка 0.10 TON' }));
         return;
       }
+      // если прислали профиль вместе со ставкой — обновим
+      if (d.profile) {
+        st.nick = d.profile.nick || st.nick;
+        st.avatar = (d.profile.avatar ?? st.avatar) || null;
+        broadcast({ type:'profile_update', userId: st.userId, nick: st.nick, avatar: st.avatar });
+      }
+
       const db = await dbPromise;
       const bal = Number(db.balances[st.userId]||0);
       if (amt>0 && bal>=amt){
@@ -350,7 +419,7 @@ wss.on('connection', async (ws, req)=>{
     }
 
     if (d.type==='cashout' && phase==='running' && st.bet>0 && !st.cashed){
-      const payout = +(st.bet * currentMultiplier * 0.98).toFixed(2); // 98% return (house edge)
+      const payout = +(st.bet * currentMultiplier * 0.98).toFixed(2);
       const db = await dbPromise;
       db.balances[st.userId] = +(Number(db.balances[st.userId]||0) + payout);
       st.bet=0; st.cashed=true;
@@ -393,7 +462,7 @@ async function pollTonCenter(){
             db._creditedTxs[txId] = true;
             console.log(`+${ton} TON => ${uid} (from ${sender})`);
           }else{
-            db._creditedTxs[txId] = true; // помечаем обработанным
+            db._creditedTxs[txId] = true;
           }
         }
       }
@@ -406,7 +475,7 @@ async function pollTonCenter(){
 // ===== START =====
 (async ()=>{
   const init = await dbPromise;
-  init.balances ||= {}; init.addressToUser ||= {}; init.history ||= []; init.withdraws ||= []; init._creditedTxs ||= {};
+  init.balances ||= {}; init.stars ||= {}; init.addressToUser ||= {}; init.history ||= []; init.withdraws ||= []; init._creditedTxs ||= {}; init._creditedStars ||= {};
   await saveDB(init); dbPromise = Promise.resolve(init);
 
   pollTonCenter();
